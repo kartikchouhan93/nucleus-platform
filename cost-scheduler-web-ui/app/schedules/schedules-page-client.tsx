@@ -1,0 +1,436 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Plus, Filter, RefreshCw, AlertCircle, Calendar } from "lucide-react";
+import { SchedulesTable } from "@/components/schedules/schedules-table";
+import { SchedulesGrid } from "@/components/schedules/schedules-grid";
+import { BulkActionsDialog } from "@/components/schedules/bulk-actions-dialog";
+import { ImportSchedulesDialog } from "@/components/schedules/import-schedules-dialog";
+import { UISchedule } from "@/lib/types";
+import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "next/navigation";
+import { useIsFirstRender } from "@/hooks/use-first-render";
+import { useDebouncedCallback } from "@/hooks/use-debounce";
+import { ClientScheduleService } from "@/lib/client-schedule-service";
+
+const statusFilters = [
+  { value: "all", label: "All Schedules" },
+  { value: "active", label: "Active Only" },
+  { value: "inactive", label: "Inactive Only" },
+];
+
+const resourceFilters = [
+  { value: "all", label: "All Resources" },
+  { value: "EC2", label: "EC2 Instances" },
+  { value: "RDS", label: "RDS Databases" },
+  { value: "ECS", label: "ECS Services" },
+  { value: "ElastiCache", label: "ElastiCache" },
+];
+
+interface SchedulesPageClientProps {
+  initialSchedules: UISchedule[];
+  initialError?: string;
+  stats?: {
+    total: number;
+    active: number;
+    inactive: number;
+    totalSavings: number;
+  };
+  initialFilters?: {
+    statusFilter: string;
+    resourceFilter: string;
+    searchTerm: string;
+  };
+}
+
+export function SchedulesPageClient({
+  initialSchedules,
+  initialError,
+  stats,
+  initialFilters,
+}: SchedulesPageClientProps) {
+  const router = useRouter();
+
+  // Data state - start with server-side data
+  const [schedules, setSchedules] = useState<UISchedule[]>(initialSchedules);
+  const [error, setError] = useState<string | null>(initialError || null);
+  const [loading, setLoading] = useState(false);
+
+  // UI state - initialize with server provided values or defaults
+  const [searchTerm, setSearchTerm] = useState(initialFilters?.searchTerm || "");
+  const [statusFilter, setStatusFilter] = useState(initialFilters?.statusFilter || "all");
+  const [resourceFilter, setResourceFilter] = useState(initialFilters?.resourceFilter || "all");
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [selectedSchedules, setSelectedSchedules] = useState<string[]>([]);
+  const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  
+  // Debounced search term setter
+  // const debouncedSearch = useDebouncedCallback((value: string) => {
+  //   setSearchTerm(value);
+  // }, 500);
+  const { toast } = useToast();
+
+  // Update URL with current filters
+  const updateUrlWithFilters = useCallback(() => {
+    const params = new URLSearchParams();
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (resourceFilter !== 'all') params.set('resource', resourceFilter);
+    if (searchTerm) params.set('search', searchTerm);
+    
+    // Replace the current URL with the new one including filters
+    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+    window.history.replaceState({}, '', newUrl);
+  }, [statusFilter, resourceFilter, searchTerm]);
+
+  // Load schedules with current filters
+  const loadSchedulesWithFilters = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Update URL first
+      updateUrlWithFilters();
+      
+      const filters = {
+        statusFilter: statusFilter !== 'all' ? statusFilter : undefined,
+        resourceFilter: resourceFilter !== 'all' ? resourceFilter : undefined,
+        searchTerm: searchTerm || undefined
+      };
+      const data = await ClientScheduleService.getSchedules(filters);
+      setSchedules(data);
+    } catch (err) {
+      console.error("Error loading schedules:", err);
+      setError(err instanceof Error ? err.message : "Failed to load schedules");
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter, resourceFilter, searchTerm, updateUrlWithFilters]);
+
+  // Handle schedule updates - this will refresh schedules with current filters
+  const handleScheduleUpdated = (message?: string) => {
+    loadSchedulesWithFilters();
+    if (message) {
+      toast({
+        variant: "success" as any,
+        title: "Success",
+        description: message,
+      });
+    }
+  };
+
+  // Track if this is the first render
+  const isFirstRender = useIsFirstRender();
+
+  // Update URL and fetch data when filters change
+  useEffect(() => {
+    // Build URL with current filters
+    const url = new URL(window.location.href);
+    
+    // Update or remove search params based on filter values
+    if (searchTerm) {
+      url.searchParams.set('search', searchTerm);
+    } else {
+      url.searchParams.delete('search');
+    }
+    
+    if (statusFilter && statusFilter !== 'all') {
+      url.searchParams.set('status', statusFilter);
+    } else {
+      url.searchParams.delete('status');
+    }
+    
+    if (resourceFilter && resourceFilter !== 'all') {
+      url.searchParams.set('resource', resourceFilter);
+    } else {
+      url.searchParams.delete('resource');
+    }
+    
+    // Update URL without page reload
+    window.history.pushState({}, '', url.toString());
+    
+    // Load schedules with new filters (skip on initial render if we already have initial data)
+    if (!isFirstRender) {
+      loadSchedulesWithFilters();
+    }
+  }, [searchTerm, statusFilter, resourceFilter, loadSchedulesWithFilters, isFirstRender]);
+
+
+
+  // Use schedules directly since filtering is done server-side
+  const filteredSchedules = schedules;
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedSchedules(filteredSchedules.map((s) => s.id));
+    } else {
+      setSelectedSchedules([]);
+    }
+  };
+
+  const handleSelectSchedule = (scheduleId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedSchedules([...selectedSchedules, scheduleId]);
+    } else {
+      setSelectedSchedules(selectedSchedules.filter((id) => id !== scheduleId));
+    }
+  };
+
+  const refreshSchedules = () => {
+    loadSchedulesWithFilters();
+  };
+
+  const handleCreateSchedule = () => {
+    router.push("/schedules/create");
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between sticky top-0 z-10 bg-background p-4 border-b">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Schedules</h1>
+          <p className="text-muted-foreground">
+            Manage cost optimization schedules and time configurations
+          </p>
+        </div>
+        <div className="flex items-center justify-end space-x-2">
+          <Button variant="outline" onClick={refreshSchedules}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh
+          </Button>
+          <Button onClick={handleCreateSchedule}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Schedule
+          </Button>
+        </div>
+      </div>
+
+      {/* Server-rendered Summary Stats */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Total Schedules
+            </CardTitle>
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.total}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats?.active} active, {stats?.inactive} inactive
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Active Schedules
+            </CardTitle>
+            <div className="h-4 w-4 rounded-full bg-green-100 flex items-center justify-center">
+              <div className="h-2 w-2 rounded-full bg-green-600"></div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.active || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats && stats.total > 0 && stats.active !== undefined
+                ? ((stats.active / stats.total) * 100).toFixed(1)
+                : 0}
+              % success rate
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Monthly Savings
+            </CardTitle>
+            <span className="text-green-600 dark:text-green-400">$</span>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              ${stats?.totalSavings?.toLocaleString()}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              across all schedules
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Schedules</CardTitle>
+            <Filter className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats?.total}</div>
+            <p className="text-xs text-muted-foreground">
+              server-side rendered
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Error Alert */}
+      {error && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Loading State */}
+      {loading && (
+        <Card>
+          <CardContent className="flex items-center justify-center py-8">
+            <div className="flex items-center space-x-2">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <span>Loading schedules...</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Selected Schedules Summary */}
+      {selectedSchedules.length > 0 && !loading && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Selected</CardTitle>
+            <Filter className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {selectedSchedules.length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              <Button
+                variant="link"
+                size="sm"
+                className="p-0 h-auto text-xs"
+                onClick={() => setBulkActionsOpen(true)}
+              >
+                Bulk actions
+              </Button>
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Filters and Search - only show when not loading */}
+      {!loading && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Filters</CardTitle>
+            <CardDescription>
+              Search and filter schedules to find what you need
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1">
+                <Input
+                  placeholder="Search schedules by name, description, or creator..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusFilters.map((filter) => (
+                    <SelectItem key={filter.value} value={filter.value}>
+                      {filter.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={resourceFilter} onValueChange={setResourceFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by resource" />
+                </SelectTrigger>
+                <SelectContent>
+                  {resourceFilters.map((filter) => (
+                    <SelectItem key={filter.value} value={filter.value}>
+                      {filter.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* View Toggle and Content - only show when not loading */}
+      {!loading && (
+        <Tabs
+          value={viewMode}
+          onValueChange={(value) => setViewMode(value as "table" | "grid")}
+        >
+          <TabsList>
+            <TabsTrigger value="table">Table View</TabsTrigger>
+            <TabsTrigger value="grid">Grid View</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="table" className="space-y-4">
+            <SchedulesTable
+              schedules={filteredSchedules}
+              selectedSchedules={selectedSchedules}
+              onSelectAll={handleSelectAll}
+              onSelectSchedule={handleSelectSchedule}
+              onScheduleUpdated={handleScheduleUpdated}
+            />
+          </TabsContent>
+
+          <TabsContent value="grid" className="space-y-4">
+            <SchedulesGrid
+              schedules={filteredSchedules}
+              selectedSchedules={selectedSchedules}
+              onSelectSchedule={handleSelectSchedule}
+              onScheduleUpdated={handleScheduleUpdated}
+            />
+          </TabsContent>
+        </Tabs>
+      )}
+
+      {/* Dialogs */}
+      <BulkActionsDialog
+        open={bulkActionsOpen}
+        onOpenChange={setBulkActionsOpen}
+        selectedSchedules={selectedSchedules}
+        onClearSelection={() => setSelectedSchedules([])}
+        onSchedulesUpdated={() =>
+          handleScheduleUpdated("Schedules updated successfully!")
+        }
+      />
+      <ImportSchedulesDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+      />
+    </div>
+  );
+}

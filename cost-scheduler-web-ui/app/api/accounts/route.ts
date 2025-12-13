@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { AccountService } from '@/lib/account-service';
+
+export async function GET(request: NextRequest) {
+    try {
+        console.log('API - GET /api/accounts - Fetching accounts');
+
+        // Extract query parameters
+        const { searchParams } = new URL(request.url);
+        const statusFilter = searchParams.get('status') || undefined;
+        const connectionFilter = searchParams.get('connection') || undefined;
+        const searchTerm = searchParams.get('search') || undefined;
+
+        const filters = {
+            statusFilter,
+            connectionFilter,
+            searchTerm
+        };
+
+        const accounts = await AccountService.getAccounts(filters);
+
+        return NextResponse.json({
+            success: true,
+            data: accounts
+        });
+    } catch (error) {
+        console.error('API - Error fetching accounts:', error);
+        return NextResponse.json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch accounts'
+        }, { status: 500 });
+    }
+}
+
+export async function POST(request: NextRequest) {
+    try {
+        console.log('API - POST /api/accounts - Creating account');
+
+        const accountData = await request.json();
+        console.log('API - Account data:', accountData);
+
+        await AccountService.createAccount(accountData);
+
+        console.log('API - Successfully created account');
+        return NextResponse.json({
+            success: true,
+            message: 'Account created successfully'
+        });
+    } catch (error) {
+        console.error('API - Error creating account:', error);
+        return NextResponse.json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to create account'
+        }, { status: 500 });
+    }
+}

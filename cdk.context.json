@@ -1,0 +1,24 @@
+{
+  "awsAccountId": "044656767899",
+  "awsRegion": "us-east-1",
+  "customDomain": {
+    "enableCustomDomain": false,
+    "domainName": "scheduler.acme.com",
+    "certificateArn": "arn:aws:acm:us-east-1:0000000000000:certificate/40e55aff-447b-4953-b0d9-4655f3c963a4",
+    "fallbackDomainName": "https://df63lmk8xaa94.cloudfront.net"
+  },
+  "scheduler": {
+    "name": "cost-optimization-scheduler",
+    "scheduleInterval": 15,
+    "crossAccountRoleName": "CrossAccountRoleForCostOptimizationScheduler",
+    "schedulerTag": "cost-optimization-scheduler"
+  },
+  "subscriptionEmails": [
+    "kartikmanimuthu@smcindiaonline.com",
+    "tech-devops-aaaamnepw4icge4vnpkz54cowu@smcglobalsecu-naz6656.slack.com"
+  ],
+  "acknowledged-issue-numbers": [
+    34892,
+    32775
+  ]
+}
