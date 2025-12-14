@@ -1,17 +1,24 @@
 // DynamoDB service for schedule operations
 import { ScanCommand, PutCommand, DeleteCommand, UpdateCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { getDynamoDBDocumentClient, APP_TABLE_NAME, handleDynamoDBError } from './aws-config';
+import { getDynamoDBDocumentClient, APP_TABLE_NAME, handleDynamoDBError, DEFAULT_TENANT_ID } from './aws-config';
 import { Schedule, UISchedule } from './types';
 import { AuditService } from './audit-service';
+
+// Helper to build PK/SK for schedules
+const buildSchedulePK = (tenantId: string, accountId: string) => `TENANT#${tenantId}#ACCOUNT#${accountId}`;
+const buildScheduleSK = (scheduleId: string) => `SCHEDULE#${scheduleId}`;
 
 export class ScheduleService {
     /**
      * Fetch all schedules from DynamoDB with optional filters
+     * Uses GSI1: gsi1pk = TYPE#SCHEDULE
      */
     static async getSchedules(filters?: {
         statusFilter?: string;
         resourceFilter?: string;
         searchTerm?: string;
+        tenantId?: string;
+        accountId?: string;
     }): Promise<UISchedule[]> {
         try {
             console.log('ScheduleService - Attempting to fetch schedules from DynamoDB with filters:', filters);
@@ -58,6 +65,13 @@ export class ScheduleService {
                 );
             }
 
+            // Filter by accountId if provided
+            if (filters?.accountId) {
+                schedules = schedules.filter(schedule =>
+                    schedule.accounts && schedule.accounts.includes(filters.accountId!)
+                );
+            }
+
             return schedules;
         } catch (error: any) {
             console.error('ScheduleService - Error fetching schedules:', error);
@@ -76,21 +90,43 @@ export class ScheduleService {
     }
 
     /**
-     * Get a specific schedule by name
+     * Get a specific schedule by name (and accountId)
+     * PK: TENANT#<tenantId>#ACCOUNT#<accountId>, SK: SCHEDULE#<name>
      */
-    static async getSchedule(name: string): Promise<UISchedule | null> {
+    static async getSchedule(name: string, accountId?: string, tenantId: string = DEFAULT_TENANT_ID): Promise<UISchedule | null> {
         try {
             const dynamoDBDocumentClient = await getDynamoDBDocumentClient();
-            const command = new GetCommand({
-                TableName: APP_TABLE_NAME,
-                Key: {
-                    pk: `SCHEDULE#${name}`,
-                    sk: 'METADATA',
-                },
-            });
 
-            const response = await dynamoDBDocumentClient.send(command);
-            return response.Item ? this.transformToUISchedule(response.Item as any) : null;
+            // If accountId is provided, use direct GetItem. Otherwise, query GSI1.
+            if (accountId) {
+                const command = new GetCommand({
+                    TableName: APP_TABLE_NAME,
+                    Key: {
+                        pk: buildSchedulePK(tenantId, accountId),
+                        sk: buildScheduleSK(name),
+                    },
+                });
+
+                const response = await dynamoDBDocumentClient.send(command);
+                return response.Item ? this.transformToUISchedule(response.Item as any) : null;
+            } else {
+                // Fallback: Query GSI1 by schedule name
+                const command = new QueryCommand({
+                    TableName: APP_TABLE_NAME,
+                    IndexName: 'GSI1',
+                    KeyConditionExpression: 'gsi1pk = :pkVal AND gsi1sk = :skVal',
+                    ExpressionAttributeValues: {
+                        ':pkVal': 'TYPE#SCHEDULE',
+                        ':skVal': name
+                    }
+                });
+
+                const response = await dynamoDBDocumentClient.send(command);
+                if (response.Items && response.Items.length > 0) {
+                    return this.transformToUISchedule(response.Items[0] as any);
+                }
+                return null;
+            }
         } catch (error: any) {
             handleDynamoDBError(error, 'getSchedule');
             return null;
@@ -99,27 +135,63 @@ export class ScheduleService {
 
     /**
      * Create a new schedule
+     * PK: TENANT#<tenantId>#ACCOUNT#<accountId>, SK: SCHEDULE#<name>
      */
-    static async createSchedule(schedule: Omit<Schedule, 'id'>): Promise<Schedule> {
+    static async createSchedule(schedule: Omit<Schedule, 'id'>, tenantId: string = DEFAULT_TENANT_ID): Promise<Schedule> {
         try {
             const dynamoDBDocumentClient = await getDynamoDBDocumentClient();
             const now = new Date().toISOString();
+            const statusText = schedule.active ? 'active' : 'inactive';
+
+            // Ensure accountId is provided
+            if (!schedule.accountId) {
+                throw new Error('accountId is required to create a schedule in multi-tenant design');
+            }
 
             const dbSchedule = {
-                pk: `SCHEDULE#${schedule.name}`,
-                sk: 'METADATA',
+                // Primary Keys (new hierarchical design)
+                pk: buildSchedulePK(tenantId, schedule.accountId),
+                sk: buildScheduleSK(schedule.name),
+
+                // GSI1: TYPE#SCHEDULE -> scheduleName (list all schedules)
                 gsi1pk: 'TYPE#SCHEDULE',
                 gsi1sk: schedule.name,
 
-                ...schedule,
+                // GSI2: ACCOUNT#<id> -> SCHEDULE#<id> (schedules per account)
+                gsi2pk: `ACCOUNT#${schedule.accountId}`,
+                gsi2sk: `SCHEDULE#${schedule.name}`,
+
+                // GSI3: STATUS#active/inactive -> TENANT#...#SCHEDULE#...
+                gsi3pk: `STATUS#${statusText}`,
+                gsi3sk: `TENANT#${tenantId}#SCHEDULE#${schedule.name}`,
+
+                // Entity type
+                type: 'schedule',
+
+                // IDs
+                tenantId: tenantId,
+                accountId: schedule.accountId,
+                scheduleId: schedule.name,
+
+                // Attributes from schedule
+                name: schedule.name,
+                days: schedule.days,
+                starttime: schedule.starttime,
+                endtime: schedule.endtime,
+                timezone: schedule.timezone,
+                active: schedule.active,
+                resources: schedule.resources,
+                description: schedule.description,
                 createdAt: now,
                 updatedAt: now,
+                createdBy: schedule.createdBy || 'system',
+                updatedBy: schedule.updatedBy || 'system',
             };
 
             const command = new PutCommand({
                 TableName: APP_TABLE_NAME,
                 Item: dbSchedule,
-                ConditionExpression: 'attribute_not_exists(pk)',
+                ConditionExpression: 'attribute_not_exists(pk) AND attribute_not_exists(sk)',
             });
 
             await dynamoDBDocumentClient.send(command);
@@ -135,6 +207,8 @@ export class ScheduleService {
                 status: 'success',
                 details: `Created schedule "${schedule.name}" with ${schedule.days.join(', ')} from ${schedule.starttime} to ${schedule.endtime}`,
                 metadata: {
+                    tenantId,
+                    accountId: schedule.accountId,
                     scheduleName: schedule.name,
                     active: schedule.active,
                 },
@@ -162,18 +236,24 @@ export class ScheduleService {
     /**
      * Update an existing schedule
      */
-    static async updateSchedule(scheduleName: string, updates: Partial<Omit<Schedule, 'name'>>): Promise<UISchedule> {
+    static async updateSchedule(scheduleName: string, updates: Partial<Omit<Schedule, 'name'>>, accountId?: string, tenantId: string = DEFAULT_TENANT_ID): Promise<UISchedule> {
         try {
-            const currentSchedule = await this.getSchedule(scheduleName);
+            const currentSchedule = await this.getSchedule(scheduleName, accountId, tenantId);
             if (!currentSchedule) {
                 throw new Error('Schedule not found');
+            }
+
+            // Use the accountId from the existing schedule if not provided
+            const effectiveAccountId = accountId || currentSchedule.accounts?.[0];
+            if (!effectiveAccountId) {
+                throw new Error('accountId is required to update a schedule');
             }
 
             const updateExpressions: string[] = [];
             const expressionAttributeNames: Record<string, string> = {};
             const expressionAttributeValues: Record<string, any> = {};
 
-            const excludedFields = ['name', 'type', 'pk', 'sk', 'gsi1pk', 'gsi1sk'];
+            const excludedFields = ['name', 'type', 'pk', 'sk', 'gsi1pk', 'gsi1sk', 'gsi2pk', 'gsi2sk', 'gsi3pk', 'gsi3sk', 'tenantId', 'accountId', 'scheduleId'];
 
             Object.entries(updates).forEach(([key, value]) => {
                 if (value !== undefined && !excludedFields.includes(key)) {
@@ -183,6 +263,14 @@ export class ScheduleService {
                 }
             });
 
+            // Update GSI3 if active status changes
+            if (updates.active !== undefined) {
+                const statusText = updates.active ? 'active' : 'inactive';
+                updateExpressions.push('#gsi3pk = :gsi3pk');
+                expressionAttributeNames['#gsi3pk'] = 'gsi3pk';
+                expressionAttributeValues[':gsi3pk'] = `STATUS#${statusText}`;
+            }
+
             // Always update updatedAt
             updateExpressions.push('#updatedAt = :updatedAt');
             expressionAttributeNames['#updatedAt'] = 'updatedAt';
@@ -191,8 +279,8 @@ export class ScheduleService {
             const command = new UpdateCommand({
                 TableName: APP_TABLE_NAME,
                 Key: {
-                    pk: `SCHEDULE#${scheduleName}`,
-                    sk: 'METADATA',
+                    pk: buildSchedulePK(tenantId, effectiveAccountId),
+                    sk: buildScheduleSK(scheduleName),
                 },
                 UpdateExpression: `SET ${updateExpressions.join(', ')}`,
                 ExpressionAttributeNames: expressionAttributeNames,
@@ -226,14 +314,26 @@ export class ScheduleService {
     /**
      * Delete a schedule
      */
-    static async deleteSchedule(name: string): Promise<void> {
+    static async deleteSchedule(name: string, accountId?: string, tenantId: string = DEFAULT_TENANT_ID): Promise<void> {
         try {
             const dynamoDBDocumentClient = await getDynamoDBDocumentClient();
+
+            // Get schedule first to get accountId if not provided
+            let effectiveAccountId = accountId;
+            if (!effectiveAccountId) {
+                const schedule = await this.getSchedule(name, undefined, tenantId);
+                effectiveAccountId = schedule?.accounts?.[0];
+            }
+
+            if (!effectiveAccountId) {
+                throw new Error('Could not determine accountId for schedule deletion');
+            }
+
             const command = new DeleteCommand({
                 TableName: APP_TABLE_NAME,
                 Key: {
-                    pk: `SCHEDULE#${name}`,
-                    sk: 'METADATA',
+                    pk: buildSchedulePK(tenantId, effectiveAccountId),
+                    sk: buildScheduleSK(name),
                 },
             });
 
@@ -257,14 +357,15 @@ export class ScheduleService {
     /**
      * Toggle schedule active status
      */
-    static async toggleScheduleStatus(name: string): Promise<UISchedule> {
+    static async toggleScheduleStatus(name: string, accountId?: string, tenantId: string = DEFAULT_TENANT_ID): Promise<UISchedule> {
         try {
-            const currentSchedule = await this.getSchedule(name);
+            const currentSchedule = await this.getSchedule(name, accountId, tenantId);
             if (!currentSchedule) {
                 throw new Error('Schedule not found');
             }
 
-            return await this.updateSchedule(name, { active: !currentSchedule.active });
+            const effectiveAccountId = accountId || currentSchedule.accounts?.[0];
+            return await this.updateSchedule(name, { active: !currentSchedule.active }, effectiveAccountId, tenantId);
         } catch (error: any) {
             throw error;
         }
@@ -274,9 +375,8 @@ export class ScheduleService {
      * Transform DynamoDB item to UI schedule format
      */
     private static transformToUISchedule(item: any): UISchedule {
-        // item might have PK/SK, strip them for UI if needed, or map fields
         return {
-            id: item.name || item.pk?.replace('SCHEDULE#', ''),
+            id: item.name || item.scheduleId || item.sk?.replace('SCHEDULE#', ''),
             name: item.name,
             starttime: item.starttime,
             endtime: item.endtime,

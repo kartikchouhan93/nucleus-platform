@@ -1,6 +1,6 @@
 // DynamoDB service for account metadata operations
 import { ScanCommand, PutCommand, DeleteCommand, UpdateCommand, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
-import { getDynamoDBDocumentClient, APP_TABLE_NAME, handleDynamoDBError } from './aws-config';
+import { getDynamoDBDocumentClient, APP_TABLE_NAME, handleDynamoDBError, DEFAULT_TENANT_ID } from './aws-config';
 import { AccountMetadata, UIAccount } from './types';
 import { AuditService } from './audit-service';
 import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
@@ -22,9 +22,14 @@ const handleError = (error: any, operation: string) => {
     }
 };
 
+// Helper to build PK/SK for accounts
+const buildAccountPK = (tenantId: string) => `TENANT#${tenantId}`;
+const buildAccountSK = (accountId: string) => `ACCOUNT#${accountId}`;
+
 export class AccountService {
     /**
      * Fetch all accounts from DynamoDB with optional filtering
+     * Uses GSI1: gsi1pk = TYPE#ACCOUNT
      */
     static async getAccounts(filters?: {
         statusFilter?: string;
@@ -32,6 +37,7 @@ export class AccountService {
         searchTerm?: string;
         limit?: number;
         nextToken?: string;
+        tenantId?: string;
     }): Promise<{ accounts: UIAccount[], nextToken?: string }> {
         try {
             console.log('AccountService - Attempting to fetch accounts from DynamoDB', filters ? `with filters: ${JSON.stringify(filters)}` : '');
@@ -98,15 +104,15 @@ export class AccountService {
 
     /**
      * Get a specific account by account ID
+     * PK: TENANT#<tenantId>, SK: ACCOUNT#<accountId>
      */
-    static async getAccount(accountId: string): Promise<UIAccount | null> {
+    static async getAccount(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<UIAccount | null> {
         try {
-            // Get Item using Primary Key (PK, SK)
             const command = new GetCommand({
                 TableName: APP_TABLE_NAME,
                 Key: {
-                    pk: `ACCOUNT#${accountId}`,
-                    sk: 'METADATA'
+                    pk: buildAccountPK(tenantId),
+                    sk: buildAccountSK(accountId)
                 }
             });
 
@@ -124,37 +130,55 @@ export class AccountService {
 
     /**
      * Create a new account
+     * PK: TENANT#<tenantId>, SK: ACCOUNT#<accountId>
      */
-    static async createAccount(account: Omit<UIAccount, 'id'>): Promise<UIAccount> {
+    static async createAccount(account: Omit<UIAccount, 'id'>, tenantId: string = DEFAULT_TENANT_ID): Promise<UIAccount> {
         try {
             const now = new Date().toISOString();
+            const statusText = account.active ? 'active' : 'inactive';
 
             const dbItem = {
-                pk: `ACCOUNT#${account.accountId}`,
-                sk: 'METADATA',
+                // Primary Keys (new hierarchical design)
+                pk: buildAccountPK(tenantId),
+                sk: buildAccountSK(account.accountId),
+
+                // GSI1: TYPE#ACCOUNT -> accountId (list all accounts)
                 gsi1pk: 'TYPE#ACCOUNT',
-                gsi1sk: account.name, // Sort by name
+                gsi1sk: account.accountId,
+
+                // GSI2: ACCOUNT#<id> -> ACCOUNT#<id> (direct lookup without tenant)
+                gsi2pk: `ACCOUNT#${account.accountId}`,
+                gsi2sk: `ACCOUNT#${account.accountId}`,
+
+                // GSI3: STATUS#active/inactive -> TENANT#...#ACCOUNT#...
+                gsi3pk: `STATUS#${statusText}`,
+                gsi3sk: `TENANT#${tenantId}#ACCOUNT#${account.accountId}`,
+
+                // Entity type
+                type: 'account',
+
+                // IDs
+                tenantId: tenantId,
+                accountId: account.accountId,
 
                 // Attributes
-                account_id: account.accountId, // Persist explicity
-                account_name: account.name,
-                role_arn: account.roleArn,
-                external_id: account.externalId, // Persist externalId
+                accountName: account.name,
+                roleArn: account.roleArn,
+                externalId: account.externalId,
                 regions: account.regions,
                 active: account.active,
                 description: account.description,
-                connection_status: 'unknown',
-                created_at: now,
-                updated_at: now,
-                created_by: account.createdBy || 'system',
-                updated_by: account.updatedBy || 'system',
-                type: 'account', // Helper attribute
+                connectionStatus: 'unknown',
+                createdAt: now,
+                updatedAt: now,
+                createdBy: account.createdBy || 'system',
+                updatedBy: account.updatedBy || 'system',
             };
 
             const command = new PutCommand({
                 TableName: APP_TABLE_NAME,
                 Item: dbItem,
-                ConditionExpression: 'attribute_not_exists(pk)',
+                ConditionExpression: 'attribute_not_exists(pk) AND attribute_not_exists(sk)',
             });
 
             await getDynamoDBDocumentClient().send(command);
@@ -170,6 +194,7 @@ export class AccountService {
                 status: 'success',
                 details: `Created AWS account "${account.name}" (${account.accountId})`,
                 metadata: {
+                    tenantId,
                     accountId: account.accountId,
                     roleArn: account.roleArn,
                 },
@@ -197,7 +222,7 @@ export class AccountService {
     /**
      * Update an existing account
      */
-    static async updateAccount(accountId: string, updates: Partial<Omit<UIAccount, 'id' | 'accountId'>>): Promise<UIAccount> {
+    static async updateAccount(accountId: string, updates: Partial<Omit<UIAccount, 'id' | 'accountId'>>, tenantId: string = DEFAULT_TENANT_ID): Promise<UIAccount> {
         try {
             const now = new Date().toISOString();
 
@@ -208,16 +233,16 @@ export class AccountService {
 
             // Map UI fields to DB fields
             const fieldMapping: Record<string, string> = {
-                name: 'account_name',
-                roleArn: 'role_arn',
-                externalId: 'external_id',
+                name: 'accountName',
+                roleArn: 'roleArn',
+                externalId: 'externalId',
                 active: 'active',
                 description: 'description',
-                connectionStatus: 'connection_status',
-                connectionError: 'connection_error',
-                updatedBy: 'updated_by',
+                connectionStatus: 'connectionStatus',
+                connectionError: 'connectionError',
+                updatedBy: 'updatedBy',
                 regions: 'regions',
-                lastValidated: 'updated_at' // Hack for validation update
+                lastValidated: 'updatedAt' // Hack for validation update
             };
 
             Object.entries(updates).forEach(([key, value]) => {
@@ -230,26 +255,34 @@ export class AccountService {
                         expressionAttributeValues[':gsi1sk'] = value;
                     }
 
+                    // Update GSI3 if active status changes
+                    if (key === 'active') {
+                        const statusText = value ? 'active' : 'inactive';
+                        updateExpressions.push('#gsi3pk = :gsi3pk');
+                        expressionAttributeNames['#gsi3pk'] = 'gsi3pk';
+                        expressionAttributeValues[':gsi3pk'] = `STATUS#${statusText}`;
+                    }
+
                     updateExpressions.push(`#${dbField} = :${dbField}`);
                     expressionAttributeNames[`#${dbField}`] = dbField;
                     expressionAttributeValues[`:${dbField}`] = value;
                 }
             });
 
-            if (updateExpressions.length === 0) return await this.getAccount(accountId) as UIAccount;
+            if (updateExpressions.length === 0) return await this.getAccount(accountId, tenantId) as UIAccount;
 
             // Updated At
-            if (!updateExpressions.some(e => e.includes('#updated_at'))) {
-                updateExpressions.push('#updated_at = :updated_at');
-                expressionAttributeNames['#updated_at'] = 'updated_at';
-                expressionAttributeValues[':updated_at'] = now;
+            if (!updateExpressions.some(e => e.includes('#updatedAt'))) {
+                updateExpressions.push('#updatedAt = :updatedAt');
+                expressionAttributeNames['#updatedAt'] = 'updatedAt';
+                expressionAttributeValues[':updatedAt'] = now;
             }
 
             const command = new UpdateCommand({
                 TableName: APP_TABLE_NAME,
                 Key: {
-                    pk: `ACCOUNT#${accountId}`,
-                    sk: 'METADATA',
+                    pk: buildAccountPK(tenantId),
+                    sk: buildAccountSK(accountId),
                 },
                 UpdateExpression: `SET ${updateExpressions.join(', ')}`,
                 ExpressionAttributeNames: expressionAttributeNames,
@@ -264,11 +297,11 @@ export class AccountService {
                 action: 'Update Account',
                 resourceType: 'account',
                 resourceId: accountId,
-                resourceName: response.Attributes?.account_name || 'unknown',
+                resourceName: response.Attributes?.accountName || 'unknown',
                 user: updates.updatedBy || 'system',
                 userType: 'user',
                 status: 'success',
-                details: `Updated AWS account "${response.Attributes?.account_name}" (${accountId})`,
+                details: `Updated AWS account "${response.Attributes?.accountName}" (${accountId})`,
                 metadata: {
                     updates
                 },
@@ -285,13 +318,13 @@ export class AccountService {
     /**
      * Delete an account
      */
-    static async deleteAccount(accountId: string, deletedBy: string = 'system'): Promise<void> {
+    static async deleteAccount(accountId: string, deletedBy: string = 'system', tenantId: string = DEFAULT_TENANT_ID): Promise<void> {
         try {
             const command = new DeleteCommand({
                 TableName: APP_TABLE_NAME,
                 Key: {
-                    pk: `ACCOUNT#${accountId}`,
-                    sk: 'METADATA',
+                    pk: buildAccountPK(tenantId),
+                    sk: buildAccountSK(accountId),
                 },
             });
 
@@ -307,7 +340,7 @@ export class AccountService {
                 userType: 'user',
                 status: 'success',
                 details: `Deleted AWS account (${accountId})`,
-                metadata: { accountId },
+                metadata: { accountId, tenantId },
             });
 
         } catch (error) {
@@ -387,12 +420,12 @@ export class AccountService {
     /**
     * Validate account connection 
     */
-    static async validateAccount(accountId: string): Promise<UIAccount> {
+    static async validateAccount(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<UIAccount> {
         try {
             console.log(`AccountService - Validating account: ${accountId}`);
 
             // 1. Get Account Details
-            const account = await this.getAccount(accountId);
+            const account = await this.getAccount(accountId, tenantId);
             if (!account) {
                 throw new Error(`Account ${accountId} not found`);
             }
@@ -405,7 +438,7 @@ export class AccountService {
             await this.updateAccount(accountId, {
                 connectionStatus: 'validating',
                 connectionError: 'None' // Clear previous error
-            });
+            }, tenantId);
 
             const now = new Date().toISOString();
 
@@ -429,7 +462,7 @@ export class AccountService {
                 console.warn(`Validation failed for ${accountId}: ${validationDetails.error}`);
             }
 
-            const updatedAccount = await this.updateAccount(accountId, updates);
+            const updatedAccount = await this.updateAccount(accountId, updates, tenantId);
 
             // Log audit
             await AuditService.logUserAction({
@@ -466,24 +499,24 @@ export class AccountService {
      */
     private static transformToUIAccount(item: any): UIAccount {
         return {
-            id: item.account_id || item.pk.replace('ACCOUNT#', ''),
-            accountId: item.account_id || item.pk.replace('ACCOUNT#', ''),
-            name: item.account_name || item.gsi1sk,
-            roleArn: item.role_arn,
-            externalId: item.external_id, // Map from DB to UI
+            id: item.accountId || item.sk?.replace('ACCOUNT#', ''),
+            accountId: item.accountId || item.sk?.replace('ACCOUNT#', ''),
+            name: item.accountName || item.account_name || item.gsi1sk,
+            roleArn: item.roleArn || item.role_arn,
+            externalId: item.externalId || item.external_id,
             regions: item.regions || [],
             active: item.active,
             description: item.description || '',
-            connectionStatus: item.connection_status || 'unknown',
-            connectionError: item.connection_error, // Map from DB
-            lastValidated: item.updated_at,
+            connectionStatus: item.connectionStatus || item.connection_status || 'unknown',
+            connectionError: item.connectionError || item.connection_error,
+            lastValidated: item.updatedAt || item.updated_at,
             resourceCount: 0, // Placeholder
             schedulesCount: 0, // Placeholder
             monthlySavings: 0, // Placeholder
-            createdAt: item.created_at,
-            updatedAt: item.updated_at,
-            createdBy: item.created_by,
-            updatedBy: item.updated_by,
+            createdAt: item.createdAt || item.created_at,
+            updatedAt: item.updatedAt || item.updated_at,
+            createdBy: item.createdBy || item.created_by,
+            updatedBy: item.updatedBy || item.updated_by,
             tags: [],
         };
     }
@@ -491,10 +524,10 @@ export class AccountService {
     /**
      * Toggle the active status of an AWS account
      */
-    static async toggleAccountStatus(accountId: string): Promise<UIAccount> {
+    static async toggleAccountStatus(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<UIAccount> {
         try {
             // Get the current account
-            const account = await this.getAccount(accountId);
+            const account = await this.getAccount(accountId, tenantId);
             if (!account) {
                 throw new Error(`Account ${accountId} not found`);
             }
@@ -503,7 +536,7 @@ export class AccountService {
             const updatedAccount = await this.updateAccount(accountId, {
                 active: !account.active,
                 updatedBy: 'system' // Set to authenticated user in real app
-            });
+            }, tenantId);
 
             return updatedAccount;
         } catch (error) {
@@ -515,11 +548,11 @@ export class AccountService {
     /**
      * Scan resources (EC2, ECS, RDS) for a given account
      */
-    static async scanResources(accountId: string): Promise<Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string }>> {
+    static async scanResources(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string }>> {
         try {
             console.log(`AccountService - Scanning resources for account: ${accountId}`);
 
-            const account = await this.getAccount(accountId);
+            const account = await this.getAccount(accountId, tenantId);
             if (!account || !account.roleArn) {
                 throw new Error('Account or Role ARN not found');
             }
@@ -608,7 +641,7 @@ export class AccountService {
             await this.updateAccount(accountId, {
                 resourceCount: resources.length,
                 lastValidated: new Date().toISOString()
-            });
+            }, tenantId);
 
             return resources;
 

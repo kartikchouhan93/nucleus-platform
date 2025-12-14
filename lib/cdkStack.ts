@@ -43,13 +43,28 @@ export class CdkStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       tableName: `${stackName}-app-table`,
       removalPolicy: RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl', // Enable TTL for ScheduleExecution records
     });
 
-    // Add GSI1
+    // Add GSI1: TYPE#<entityType> -> entityId (List all entities of a type)
     appTable.addGlobalSecondaryIndex({
       indexName: 'GSI1',
       partitionKey: { name: 'gsi1pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'gsi1sk', type: dynamodb.AttributeType.STRING },
+    });
+
+    // Add GSI2: ACCOUNT#<accountId> -> SCHEDULE#<scheduleId> (Direct account/schedule lookup)
+    appTable.addGlobalSecondaryIndex({
+      indexName: 'GSI2',
+      partitionKey: { name: 'gsi2pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'gsi2sk', type: dynamodb.AttributeType.STRING },
+    });
+
+    // Add GSI3: STATUS#<active/inactive> -> TENANT#<...> (Filter by status)
+    appTable.addGlobalSecondaryIndex({
+      indexName: 'GSI3',
+      partitionKey: { name: 'gsi3pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'gsi3sk', type: dynamodb.AttributeType.STRING },
     });
 
     // 2. Nucleus Audit Table

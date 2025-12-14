@@ -8,7 +8,8 @@ export interface Schedule {
     active: boolean;
     days: string[];
     description?: string;
-    accountId?: string; // Account ID this schedule applies to
+    tenantId?: string; // Tenant ID for multi-tenant schema
+    accountId?: string; // Account ID this schedule applies to (required in new schema)
     resources?: Array<{ // Selected resources
         id: string;
         type: 'ec2' | 'ecs' | 'rds';
@@ -23,6 +24,7 @@ export interface Schedule {
 
 export interface AccountMetadata {
     type: 'account_metadata';
+    tenantId?: string; // Tenant ID for multi-tenant schema
     accountId: string;
     name: string;
     roleArn: string;
