@@ -11,7 +11,9 @@ export class ClientScheduleService {
         statusFilter?: string;
         resourceFilter?: string;
         searchTerm?: string;
-    }): Promise<UISchedule[]> {
+        page?: number;
+        limit?: number;
+    }): Promise<{ schedules: UISchedule[], total: number }> {
         try {
             console.log('ClientScheduleService - Fetching schedules via API route', filters);
 
@@ -25,6 +27,12 @@ export class ClientScheduleService {
             }
             if (filters?.searchTerm) {
                 params.append('search', filters.searchTerm);
+            }
+            if (filters?.page) {
+                params.append('page', filters.page.toString());
+            }
+            if (filters?.limit) {
+                params.append('limit', filters.limit.toString());
             }
 
             const url = params.toString() ? `${this.baseUrl}?${params.toString()}` : this.baseUrl;
@@ -47,7 +55,10 @@ export class ClientScheduleService {
             }
 
             console.log('ClientScheduleService - Successfully fetched schedules:', result.data.length);
-            return result.data;
+            return {
+                schedules: result.data,
+                total: result.meta?.total || result.data.length
+            };
         } catch (error) {
             console.error('ClientScheduleService - Error fetching schedules:', error);
             throw error;

@@ -29,6 +29,15 @@ import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { useIsFirstRender } from "@/hooks/use-first-render";
 import { ClientScheduleService } from "@/lib/client-schedule-service";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 
 const statusFilters = [
   { value: "all", label: "All Schedules" },
@@ -58,6 +67,11 @@ interface SchedulesPageClientProps {
     resourceFilter: string;
     searchTerm: string;
   };
+  initialPagination?: {
+    page: number;
+    limit: number;
+    total: number;
+  };
 }
 
 export function SchedulesPageClient({
@@ -65,6 +79,7 @@ export function SchedulesPageClient({
   initialError,
   stats,
   initialFilters,
+  initialPagination,
 }: SchedulesPageClientProps) {
   const router = useRouter();
 
@@ -72,11 +87,16 @@ export function SchedulesPageClient({
   const [schedules, setSchedules] = useState<UISchedule[]>(initialSchedules);
   const [error, setError] = useState<string | null>(initialError || null);
   const [loading, setLoading] = useState(false);
+  const [totalItems, setTotalItems] = useState(initialPagination?.total || initialSchedules.length);
 
   // Effective filters (used for fetching data)
   const [searchTerm, setSearchTerm] = useState(initialFilters?.searchTerm || "");
   const [statusFilter, setStatusFilter] = useState(initialFilters?.statusFilter || "all");
   const [resourceFilter, setResourceFilter] = useState(initialFilters?.resourceFilter || "all");
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(initialPagination?.page || 1);
+  const [limit, setLimit] = useState(initialPagination?.limit || 10);
 
   // Local UI state for filters (pending application)
   const [localSearchTerm, setLocalSearchTerm] = useState(initialFilters?.searchTerm || "");
@@ -90,17 +110,19 @@ export function SchedulesPageClient({
   
   const { toast } = useToast();
 
-  // Update URL with current filters
+  // Update URL with current filters and pagination
   const updateUrlWithFilters = useCallback(() => {
     const params = new URLSearchParams();
     if (statusFilter !== 'all') params.set('status', statusFilter);
     if (resourceFilter !== 'all') params.set('resource', resourceFilter);
     if (searchTerm) params.set('search', searchTerm);
+    if (currentPage > 1) params.set('page', currentPage.toString());
+    params.set('limit', limit.toString());
     
     // Replace the current URL with the new one including filters
     const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
     window.history.replaceState({}, '', newUrl);
-  }, [statusFilter, resourceFilter, searchTerm]);
+  }, [statusFilter, resourceFilter, searchTerm, currentPage, limit]);
 
   // Load schedules with current filters
   const loadSchedulesWithFilters = useCallback(async () => {
@@ -114,17 +136,20 @@ export function SchedulesPageClient({
       const filters = {
         statusFilter: statusFilter !== 'all' ? statusFilter : undefined,
         resourceFilter: resourceFilter !== 'all' ? resourceFilter : undefined,
-        searchTerm: searchTerm || undefined
+        searchTerm: searchTerm || undefined,
+        page: currentPage,
+        limit: limit
       };
-      const data = await ClientScheduleService.getSchedules(filters);
-      setSchedules(data);
+      const result = await ClientScheduleService.getSchedules(filters);
+      setSchedules(result.schedules);
+      setTotalItems(result.total);
     } catch (err) {
       console.error("Error loading schedules:", err);
       setError(err instanceof Error ? err.message : "Failed to load schedules");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, resourceFilter, searchTerm, updateUrlWithFilters]);
+  }, [statusFilter, resourceFilter, searchTerm, currentPage, limit, updateUrlWithFilters]);
 
   // Handle schedule updates - this will refresh schedules with current filters
   const handleScheduleUpdated = (message?: string) => {
@@ -147,7 +172,7 @@ export function SchedulesPageClient({
     if (!isFirstRender) {
       loadSchedulesWithFilters();
     }
-  }, [searchTerm, statusFilter, resourceFilter, loadSchedulesWithFilters, isFirstRender]);
+  }, [searchTerm, statusFilter, resourceFilter, currentPage, limit, loadSchedulesWithFilters, isFirstRender]);
 
   // Use schedules directly since filtering is done server-side
   const filteredSchedules = schedules;
@@ -189,6 +214,7 @@ export function SchedulesPageClient({
     setSearchTerm(localSearchTerm);
     setStatusFilter(localStatusFilter);
     setResourceFilter(localResourceFilter);
+    setCurrentPage(1); // Reset to first page
   };
 
   const handleClearFilter = () => {
@@ -201,6 +227,7 @@ export function SchedulesPageClient({
     setSearchTerm("");
     setStatusFilter("all");
     setResourceFilter("all");
+    setCurrentPage(1); // Reset to first page
   };
 
   const handleCreateSchedule = () => {
@@ -429,6 +456,46 @@ export function SchedulesPageClient({
             />
           </TabsContent>
         </Tabs>
+      )}
+
+      {/* Pagination */}
+      {!loading && totalItems > 0 && (
+        <Pagination className="mt-4">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious 
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPage > 1) setCurrentPage(currentPage - 1);
+                }}
+                aria-disabled={currentPage === 1}
+                className={currentPage === 1 ? "pointer-events-none opacity-50" : ""}
+              />
+            </PaginationItem>
+            
+            {/* Simple pagination logic: just show current page context or ranges */}
+            {/* For now, simplified view: Prev, Page X of Y, Next */}
+            
+            <PaginationItem>
+              <span className="px-4 text-sm text-muted-foreground">
+                Page {currentPage} of {Math.ceil(totalItems / limit)}
+              </span>
+            </PaginationItem>
+
+            <PaginationItem>
+              <PaginationNext 
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPage < Math.ceil(totalItems / limit)) setCurrentPage(currentPage + 1);
+                }}
+                aria-disabled={currentPage >= Math.ceil(totalItems / limit)}
+                className={currentPage >= Math.ceil(totalItems / limit) ? "pointer-events-none opacity-50" : ""}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
       )}
 
       {/* Dialogs */}

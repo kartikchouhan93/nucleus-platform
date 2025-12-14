@@ -19,7 +19,9 @@ export class ScheduleService {
         searchTerm?: string;
         tenantId?: string;
         accountId?: string;
-    }): Promise<UISchedule[]> {
+        page?: number;
+        limit?: number;
+    }): Promise<{ schedules: UISchedule[], total: number }> {
         try {
             console.log('ScheduleService - Attempting to fetch schedules from DynamoDB with filters:', filters);
 
@@ -37,7 +39,7 @@ export class ScheduleService {
 
             console.log('ScheduleService - Sending DynamoDB Query command to GSI1...');
             const response = await dynamoDBDocumentClient.send(new QueryCommand(params));
-            console.log('ScheduleService - Successfully fetched schedules:', response.Items?.length || 0);
+            console.log('ScheduleService - Successfully fetched raw schedules:', response.Items?.length || 0);
 
             let schedules = (response.Items || []).map(item => this.transformToUISchedule(item as any));
 
@@ -72,11 +74,21 @@ export class ScheduleService {
                 );
             }
 
-            return schedules;
+            // Calculate total before slicing
+            const total = schedules.length;
+
+            // Apply pagination if provided
+            if (filters?.page && filters.limit) {
+                const startIndex = (filters.page - 1) * filters.limit;
+                const endIndex = startIndex + filters.limit;
+                schedules = schedules.slice(startIndex, endIndex);
+            }
+
+            return { schedules, total };
         } catch (error: any) {
             console.error('ScheduleService - Error fetching schedules:', error);
             handleDynamoDBError(error, 'getSchedules');
-            return [];
+            return { schedules: [], total: 0 };
         }
     }
 
@@ -86,7 +98,8 @@ export class ScheduleService {
     static async getSchedulesWithFilters(active?: boolean, searchTerm?: string): Promise<UISchedule[]> {
         // Reuse general getSchedules logic for consistency
         const statusFilter = active === undefined ? undefined : (active ? 'active' : 'inactive');
-        return this.getSchedules({ statusFilter, searchTerm });
+        const result = await this.getSchedules({ statusFilter, searchTerm });
+        return result.schedules;
     }
 
     /**

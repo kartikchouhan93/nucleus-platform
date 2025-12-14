@@ -13,24 +13,30 @@ export async function GET(request: NextRequest) {
         const statusFilter = searchParams.get('status') || undefined;
         const resourceFilter = searchParams.get('resource') || undefined;
         const searchTerm = searchParams.get('search') || undefined;
+        const page = parseInt(searchParams.get('page') || '1', 10);
+        const limit = parseInt(searchParams.get('limit') || '10', 10);
 
         const filters = {
             statusFilter,
             resourceFilter,
-            searchTerm
+            searchTerm,
+            page,
+            limit
         };
 
-
-
         // Fetch schedules with optional filters
-        const schedules = await ScheduleService.getSchedules(filters);
-
-
+        const { schedules, total } = await ScheduleService.getSchedules(filters);
 
         return NextResponse.json({
             success: true,
             data: schedules,
             count: schedules.length,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
         });
     } catch (error: unknown) {
         console.error('API - Error fetching schedules:', error);

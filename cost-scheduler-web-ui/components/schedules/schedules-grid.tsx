@@ -390,6 +390,9 @@ export function SchedulesGrid({
           schedule={duplicatingSchedule}
           open={!!duplicatingSchedule}
           onOpenChange={(open) => !open && setDuplicatingSchedule(null)}
+          onScheduleDuplicated={() => {
+            onScheduleUpdated?.();
+          }}
         />
       )}
       {deletingSchedule && (

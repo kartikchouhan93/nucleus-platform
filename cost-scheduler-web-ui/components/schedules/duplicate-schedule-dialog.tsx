@@ -25,12 +25,14 @@ interface DuplicateScheduleDialogProps {
   schedule: any;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onScheduleDuplicated?: () => void;
 }
 
 export function DuplicateScheduleDialog({
   schedule,
   open,
   onOpenChange,
+  onScheduleDuplicated,
 }: DuplicateScheduleDialogProps) {
   const { data: session } = useSession();
   const [formData, setFormData] = useState({
@@ -67,8 +69,11 @@ export function DuplicateScheduleDialog({
         timezone: schedule.timezone,
         days: schedule.days,
         active: formData.active,
-        createdBy: session?.user?.email || "user", // Get from auth context
+        createdBy: session?.user?.email || "user",
         updatedBy: "user",
+        // Pass accountId and resources
+        accountId: schedule.accounts?.[0] || schedule.accountId,
+        resources: schedule.resources,
       });
 
       onOpenChange(false);
@@ -77,8 +82,10 @@ export function DuplicateScheduleDialog({
         title: "Schedule Duplicated",
         description: `Schedule "${formData.name}" created successfully.`,
       });
-      // Refresh the page to show the duplicated schedule
-      window.location.reload();
+      // Call the callback to refresh the parent list
+      if (onScheduleDuplicated) {
+        onScheduleDuplicated();
+      }
     } catch (error: any) {
       console.error("Error duplicating schedule:", error);
       toast({

@@ -393,6 +393,9 @@ export function SchedulesTable({
           schedule={duplicatingSchedule}
           open={!!duplicatingSchedule}
           onOpenChange={(open) => !open && setDuplicatingSchedule(null)}
+          onScheduleDuplicated={() => {
+            onScheduleUpdated?.();
+          }}
         />
       )}
       {deletingSchedule && (
