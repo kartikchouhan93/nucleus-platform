@@ -1,24 +1,35 @@
+import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { tool } from 'ai';
-import { executeCodeInSandbox } from './sandbox'; // Ensure this path matches your project
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
-export const agentTools = {
-    execute_javascript: tool({
-        description: 'Execute JavaScript code in a secure sandbox. Use this to fetch data from AWS.',
-        parameters: z.object({
-            code: z.string().describe('The JavaScript code to execute')
+const execAsync = promisify(exec);
+
+export const executeCommandTool = tool(
+    async ({ command }: { command: string }) => {
+        console.log(`[Agent] Executing command: ${command}`);
+
+        try {
+            const { stdout, stderr } = await execAsync(command, {
+                timeout: 30000, // 30 second timeout
+                maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+            });
+
+            const output = stdout || stderr || 'Command executed successfully (no output)';
+            console.log(`[Agent] Command Output Length: ${output.length}`);
+
+            return output;
+        } catch (error: any) {
+            const errorMsg = `Command failed: ${error.message}\n${error.stderr || ''}`;
+            console.error(`[Agent] Command Error:`, errorMsg);
+            return errorMsg;
+        }
+    },
+    {
+        name: 'execute_command',
+        description: 'Execute a shell command on the system. Use this to check system status, list files, inspect processes, or run AWS CLI commands. Always sanitize and validate commands for security.',
+        schema: z.object({
+            command: z.string().describe('The shell command to execute'),
         }),
-        execute: async ({ code }: { code: string }) => {
-            console.log("Executing Agent Code:\n", code);
-            try {
-                return await executeCodeInSandbox(code);
-            } catch (error: any) {
-                console.error("Sandbox Execution Error:", error);
-                throw error; // Re-throw to let the AI SDK handle it, or return a string if we want the agent to see it. 
-                // For now, re-throwing might be safer for debugging, or return string.
-                // Let's return the string error so the model can self-correct.
-                return `Error: ${error.message}`;
-            }
-        },
-    }),
-};
+    }
+);
