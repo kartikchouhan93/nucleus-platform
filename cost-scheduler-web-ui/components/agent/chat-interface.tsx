@@ -6,27 +6,155 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Bot, User, Trash2, Loader2, Terminal, Send, ChevronDown, ChevronRight } from 'lucide-react';
+import { 
+  Bot, User, Trash2, Loader2, Terminal, Send, 
+  Briefcase, Cpu, Check, X, Brain, RefreshCw, 
+  Flag, ListChecks, Sparkles, Settings, Zap
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { Task, TaskTrigger, TaskContent, TaskItem } from '@/components/ai-elements/task';
+import { 
+  Confirmation, 
+  ConfirmationRequest, 
+  ConfirmationAccepted, 
+  ConfirmationRejected, 
+  ConfirmationActions, 
+  ConfirmationAction 
+} from '@/components/ai-elements/confirmation';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+// Available models
+const AVAILABLE_MODELS = [
+  { id: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0', label: 'Claude Sonnet 4.5 (Default)', provider: 'anthropic' },
+  { id: 'anthropic.claude-3-5-sonnet-20241022-v2:0', label: 'Claude 3.5 Sonnet', provider: 'anthropic' },
+  { id: 'anthropic.claude-3-5-haiku-20241022-v1:0', label: 'Claude 3.5 Haiku (Fast)', provider: 'anthropic' },
+  { id: 'amazon.nova-pro-v1:0', label: 'Amazon Nova Pro', provider: 'amazon' },
+  { id: 'amazon.nova-lite-v1:0', label: 'Amazon Nova Lite', provider: 'amazon' },
+];
+
+// Phase types matching backend
+type AgentPhase = 'planning' | 'execution' | 'reflection' | 'revision' | 'final' | 'text';
+
+// Parse phase from content
+function parsePhaseFromContent(content: string): { phase: AgentPhase; cleanContent: string } {
+  if (content.startsWith("PLANNING_PHASE_START\n")) {
+    return { phase: 'planning', cleanContent: content.replace("PLANNING_PHASE_START\n", "") };
+  } else if (content.startsWith("EXECUTION_PHASE_START\n")) {
+    return { phase: 'execution', cleanContent: content.replace("EXECUTION_PHASE_START\n", "") };
+  } else if (content.startsWith("REFLECTION_PHASE_START\n")) {
+    return { phase: 'reflection', cleanContent: content.replace("REFLECTION_PHASE_START\n", "") };
+  } else if (content.startsWith("REVISION_PHASE_START\n")) {
+    return { phase: 'revision', cleanContent: content.replace("REVISION_PHASE_START\n", "") };
+  } else if (content.startsWith("FINAL_PHASE_START\n")) {
+    return { phase: 'final', cleanContent: content.replace("FINAL_PHASE_START\n", "") };
+  }
+  return { phase: 'text', cleanContent: content };
+}
+
+// Phase configuration
+const phaseConfig: Record<AgentPhase, { 
+  icon: React.ElementType; 
+  label: string; 
+  borderColor: string; 
+  bgColor: string; 
+  textColor: string;
+}> = {
+  planning: { 
+    icon: ListChecks, 
+    label: 'PLANNING', 
+    borderColor: 'border-blue-500', 
+    bgColor: 'bg-blue-500/5', 
+    textColor: 'text-blue-600' 
+  },
+  execution: { 
+    icon: Cpu, 
+    label: 'EXECUTION', 
+    borderColor: 'border-amber-500', 
+    bgColor: 'bg-amber-500/5', 
+    textColor: 'text-amber-600' 
+  },
+  reflection: { 
+    icon: Brain, 
+    label: 'REFLECTION', 
+    borderColor: 'border-purple-500', 
+    bgColor: 'bg-purple-500/5', 
+    textColor: 'text-purple-600' 
+  },
+  revision: { 
+    icon: RefreshCw, 
+    label: 'REVISION', 
+    borderColor: 'border-cyan-500', 
+    bgColor: 'bg-cyan-500/5', 
+    textColor: 'text-cyan-600' 
+  },
+  final: { 
+    icon: Flag, 
+    label: 'COMPLETE', 
+    borderColor: 'border-green-500', 
+    bgColor: 'bg-green-500/5', 
+    textColor: 'text-green-600' 
+  },
+  text: { 
+    icon: Bot, 
+    label: 'RESPONSE', 
+    borderColor: 'border-muted', 
+    bgColor: 'bg-muted/10', 
+    textColor: 'text-muted-foreground' 
+  },
+};
 
 export function ChatInterface() {
+  const [threadId] = useState(() => Date.now().toString());
+  
+  // Configuration state (before conversation starts)
+  const [autoApprove, setAutoApprove] = useState(true);
+  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id);
+  const [hasStarted, setHasStarted] = useState(false);
+
   const { 
     messages, 
     sendMessage,
     isLoading, 
     setMessages,
+    addToolResult,
   } = useChat({
     api: '/api/chat',
-    maxSteps: 5,
-    onError: (error) => {
-      console.error('Chat error:', error);
+    maxSteps: 10,
+    body: {
+        threadId,
+        autoApprove,
+        model: selectedModel,
     },
-  });
+    onResponse: (response: Response) => {
+        console.log('[ChatInterface] Received response headers:', response);
+    },
+    onFinish: (message: any, options: any) => {
+        console.log('[ChatInterface] Chat finished. Final message:', message);
+        console.log('[ChatInterface] Usage/Options:', options);
+    },
+    onError: (error) => {
+      console.error('[ChatInterface] Chat error:', error);
+    },
+  }) as any;
+
+  useEffect(() => {
+    console.log('[ChatInterface] Messages State Updated:', messages);
+    if (messages.length > 0) {
+      setHasStarted(true);
+    }
+  }, [messages]);
 
   const [inputValue, setInputValue] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -35,6 +163,7 @@ export function ChatInterface() {
 
   const handleClear = () => {
     setMessages([]);
+    setHasStarted(false);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,190 +176,349 @@ export function ChatInterface() {
 
     const value = inputValue;
     setInputValue('');
+    setHasStarted(true);
     
     await sendMessage({
       text: value
     });
   };
 
+  // Render a phase block
+  const renderPhaseBlock = (phase: AgentPhase, content: string, key: string) => {
+    const config = phaseConfig[phase];
+    const Icon = config.icon;
+
+    // Try to parse plan steps if it's a planning phase with numbered list
+    const planSteps = phase === 'planning' ? 
+      content.split('\n').filter(line => /^\d+\./.test(line.trim())) : [];
+
+    return (
+      <div 
+        key={key} 
+        className={cn(
+          "w-full border-l-4 rounded-r-lg overflow-hidden text-xs mb-2 shadow-sm",
+          config.borderColor,
+          config.bgColor
+        )}
+      >
+        <div className={cn(
+          "px-3 py-1.5 font-semibold flex items-center gap-2 border-b",
+          `${config.bgColor.replace('/5', '/10')}`,
+          config.textColor
+        )}>
+          <Icon className="w-3.5 h-3.5" />
+          {config.label}
+        </div>
+        
+        {planSteps.length > 0 ? (
+          <div className="p-3">
+            <Task defaultOpen={true}>
+              <TaskTrigger title="Execution Plan" status="in_progress" />
+              <TaskContent>
+                {planSteps.map((step, i) => (
+                  <TaskItem key={i} status="pending">
+                    {step.replace(/^\d+\.\s*/, '')}
+                  </TaskItem>
+                ))}
+              </TaskContent>
+            </Task>
+          </div>
+        ) : (
+          <div className="p-3 whitespace-pre-wrap text-muted-foreground/90 leading-relaxed font-mono">
+            {content}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render tool invocation
+  const renderToolInvocation = (part: any, messageId: string, index: number) => {
+    const toolName = part.toolName || 'tool';
+    const args = part.args || part.input;
+    const result = part.result || part.output;
+    const state = part.state;
+    
+    const isCall = state === 'call' || !result;
+    // Show approval UI only when: not auto-approve AND tool is in "call" state without result
+    const isPending = !autoApprove && isCall && !result && !isLoading;
+
+    // Determine approval state for Confirmation component
+    const approvalState = result === 'Approved' ? 'approved' : 
+                          result === 'Cancelled by user' ? 'rejected' : 
+                          isPending ? 'pending' : undefined;
+
+    return (
+      <div
+        key={part.toolCallId || `${messageId}-tool-${index}`}
+        className="w-full border rounded-lg overflow-hidden bg-muted/5 text-sm mt-2 shadow-sm"
+      >
+        {/* Tool Header */}
+        <div className="flex items-center gap-2 px-3 py-2 bg-muted/10 border-b">
+          <Terminal className="w-4 h-4 text-primary/60" />
+          <span className="font-semibold text-xs tracking-tight">
+            {toolName.toUpperCase()}
+          </span>
+          {autoApprove && (
+            <span className="ml-1 text-[10px] text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full font-medium">
+              AUTO
+            </span>
+          )}
+          {isLoading && isCall && !result && (
+            <Loader2 className="w-3 h-3 animate-spin ml-auto text-muted-foreground" />
+          )}
+          {result && result !== 'Approved' && result !== 'Cancelled by user' && (
+            <Check className="w-3 h-3 text-green-500 ml-auto" />
+          )}
+        </div>
+
+        {/* Command / Input */}
+        <div className="px-3 py-2 font-mono text-[11px] bg-black/5 dark:bg-white/5 border-b border-dashed border-muted/20">
+          <span className="text-primary/40 select-none">$ </span>
+          <span>{typeof args === 'string' ? args : JSON.stringify(args)}</span>
+        </div>
+
+        {/* Approval UI using Confirmation component - only when autoApprove is OFF */}
+        {isPending && (
+          <Confirmation approval={{ id: part.toolCallId, state: 'pending' }} state="pending">
+            <ConfirmationRequest>
+              The agent wants to execute this {toolName}. Do you approve?
+            </ConfirmationRequest>
+            <ConfirmationActions>
+              <ConfirmationAction 
+                variant="outline"
+                onClick={() => addToolResult({ toolCallId: part.toolCallId, result: 'Cancelled by user' })}
+              >
+                <X className="w-3 h-3 mr-1" />
+                Reject
+              </ConfirmationAction>
+              <ConfirmationAction 
+                variant="default"
+                onClick={() => addToolResult({ toolCallId: part.toolCallId, result: 'Approved' })}
+              >
+                <Check className="w-3 h-3 mr-1" />
+                Approve & Run
+              </ConfirmationAction>
+            </ConfirmationActions>
+          </Confirmation>
+        )}
+
+        {/* Approved/Rejected status */}
+        {approvalState === 'approved' && (
+          <Confirmation state="approved">
+            <ConfirmationAccepted>Tool execution approved</ConfirmationAccepted>
+          </Confirmation>
+        )}
+        {approvalState === 'rejected' && (
+          <Confirmation state="rejected">
+            <ConfirmationRejected>Tool execution rejected by user</ConfirmationRejected>
+          </Confirmation>
+        )}
+
+        {/* Result */}
+        {result && result !== 'Approved' && result !== 'Cancelled by user' && (
+          <div className="px-3 py-2 border-t font-mono text-[11px] whitespace-pre-wrap break-all max-h-60 overflow-y-auto bg-muted/5">
+            {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Configuration Panel (shown before conversation starts)
+  const renderConfigPanel = () => (
+    <div className="p-6 border-b bg-gradient-to-br from-muted/20 to-muted/5">
+      <div className="flex items-center gap-2 mb-4">
+        <Settings className="w-5 h-5 text-primary" />
+        <h3 className="font-semibold text-lg">Agent Configuration</h3>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Model Selection */}
+        <div className="space-y-2">
+          <Label htmlFor="model-select" className="text-sm font-medium">
+            AI Model
+          </Label>
+          <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <SelectTrigger id="model-select" className="w-full">
+              <SelectValue placeholder="Select a model" />
+            </SelectTrigger>
+            <SelectContent>
+              {AVAILABLE_MODELS.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  <div className="flex items-center gap-2">
+                    <span>{model.label}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Choose the AI model for this session
+          </p>
+        </div>
+
+        {/* Auto-Approve Toggle */}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Tool Execution</Label>
+          <div className="flex items-center space-x-3 p-3 border rounded-lg bg-background">
+            <Checkbox 
+              id="auto-approve" 
+              checked={autoApprove}
+              onCheckedChange={(checked) => setAutoApprove(checked === true)}
+            />
+            <div className="flex-1">
+              <Label htmlFor="auto-approve" className="text-sm font-medium cursor-pointer flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-500" />
+                Auto-Approve Tools
+              </Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {autoApprove 
+                  ? "Tools will execute automatically without requiring approval" 
+                  : "Each tool execution will require manual approval"}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Sample prompts
+  const samplePrompts = [
+    "List all files in the current directory",
+    "Search the web for LangGraph best practices",
+    "Check my AWS Lambda functions"
+  ];
+
   return (
     <div className="flex flex-col h-[calc(100vh-theme(spacing.16))] md:h-[calc(100vh-6rem)] max-w-4xl mx-auto w-full border rounded-xl overflow-hidden shadow-lg bg-background">
       {/* Header */}
       <div className="p-4 border-b bg-gradient-to-r from-primary/10 to-primary/5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <Bot className="w-6 h-6 text-primary" />
-            {isLoading && (
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-              </span>
-            )}
-          </div>
+          <Avatar className="h-10 w-10 border shadow-sm">
+            <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold">
+              <Bot className="h-5 w-5" />
+            </AvatarFallback>
+          </Avatar>
           <div>
-            <h2 className="font-semibold text-lg">Nucleus DevOps Agent</h2>
-            <p className="text-xs text-muted-foreground">
-              {isLoading ? 'Processing...' : 'Ready to assist'}
+            <h2 className="font-semibold flex items-center gap-2">
+              Nucleus Reflection Agent
+              <Sparkles className="w-4 h-4 text-amber-500" />
+            </h2>
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              Plan → Execute → Reflect → Revise
+              {autoApprove && <span className="text-green-600 ml-1">(Auto-Approve ON)</span>}
             </p>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleClear}
-          title="Clear Chat"
-          disabled={messages.length === 0}
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={handleClear} 
+          title="Clear conversation"
+          className="text-muted-foreground hover:text-foreground"
         >
-          <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive transition-colors" />
+          <Trash2 className="h-4 w-4" />
         </Button>
       </div>
+
+      {/* Configuration Panel - only shown when no messages yet */}
+      {!hasStarted && renderConfigPanel()}
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4">
+          {/* Initial prompt suggestions when no messages */}
           {messages.length === 0 && (
-            <div className="text-center text-muted-foreground py-12">
-              <Bot className="w-16 h-16 mx-auto mb-4 opacity-40" />
-              <h3 className="text-lg font-medium mb-2">Welcome to Nucleus DevOps Agent</h3>
-              <p className="text-sm mb-4">
-                I have executive permissions to check your system.
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-16 h-16 mb-4 rounded-full bg-primary/10 flex items-center justify-center">
+                <Bot className="w-8 h-8 text-primary" />
+              </div>
+              <h3 className="text-lg font-medium mb-2">Start a Conversation</h3>
+              <p className="text-sm text-muted-foreground mb-4 max-w-md">
+                The agent will plan, execute tools, reflect on results, and revise as needed.
               </p>
-              <div className="max-w-md mx-auto space-y-2 text-xs">
-                <p className="font-mono bg-muted/50 p-2 rounded cursor-pointer hover:bg-muted transition-colors" onClick={() => setInputValue("List all EC2 instances")}>
-                  💡 Try: &quot;List all EC2 instances&quot;
-                </p>
-                <p className="font-mono bg-muted/50 p-2 rounded cursor-pointer hover:bg-muted transition-colors" onClick={() => setInputValue("Show disk usage")}>
-                  💡 Try: &quot;Show disk usage&quot;
-                </p>
-                <p className="font-mono bg-muted/50 p-2 rounded cursor-pointer hover:bg-muted transition-colors" onClick={() => setInputValue("Check running Docker containers")}>
-                  💡 Try: &quot;Check running Docker containers&quot;
-                </p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {samplePrompts.map((prompt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setInputValue(prompt)}
+                    className="px-3 py-1.5 text-xs rounded-full border bg-background hover:bg-muted transition-colors"
+                  >
+                    💡 {prompt}
+                  </button>
+                ))}
               </div>
             </div>
           )}
 
-          {messages.map((message) => {
+          {/* Render messages */}
+          {messages.map((message: any) => {
+            const isUser = message.role === 'user';
+            
             return (
-              <div
-                key={message.id}
+              <div 
+                key={message.id} 
                 className={cn(
-                  'flex gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300',
-                  message.role === 'user' ? 'justify-end' : 'justify-start',
+                  "flex gap-3",
+                  isUser ? "justify-end" : "justify-start"
                 )}
               >
-                {message.role === 'assistant' && (
-                  <Avatar className="w-8 h-8 border-2 border-primary/20 mt-1">
-                    <AvatarFallback className="bg-primary/10">
-                      <Bot className="w-4 h-4 text-primary" />
+                {/* AI Avatar */}
+                {!isUser && (
+                  <Avatar className="h-8 w-8 flex-shrink-0 border shadow-sm">
+                    <AvatarFallback className="bg-gradient-to-br from-primary/80 to-primary text-primary-foreground text-xs">
+                      <Bot className="h-4 w-4" />
                     </AvatarFallback>
                   </Avatar>
                 )}
 
-                <div
-                  className={cn(
-                    'flex flex-col gap-2 max-w-[85%]',
-                    message.role === 'user' ? 'items-end' : 'items-start',
-                  )}
-                >
-                  {/* Render Message Parts */}
-                  {message.parts && message.parts.map((keydown, index) => {
-                    // Note: 'keydown' is just a variable name, strictly typing it is hard without generics
-                    // Using 'part' as variable name
-                    const part = keydown as any; 
-
+                {/* Message Content */}
+                <div className={cn(
+                  "max-w-[85%] rounded-lg p-3 text-sm",
+                  isUser 
+                    ? "bg-primary text-primary-foreground ml-auto" 
+                    : "bg-muted/50 border"
+                )}>
+                  {/* Render parts */}
+                  {message.parts && message.parts.map((part: any, index: number) => {
+                    // Text part
                     if (part.type === 'text') {
-                        return (
-                            <div
-                                key={`${message.id}-part-${index}`}
-                                className={cn(
-                                'rounded-lg px-4 py-2.5 shadow-sm',
-                                message.role === 'user'
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'bg-secondary text-secondary-foreground border',
-                                )}
-                            >
-                                <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                                {part.text || ""}
-                                </div>
-                            </div>
-                        );
+                      const text = part.text || "";
+                      if (!text.trim()) return null;
+                      return (
+                        <div key={`${message.id}-part-${index}`} className="whitespace-pre-wrap">
+                          {text}
+                        </div>
+                      );
                     }
-                    
+
+                    // Reasoning part (contains phase markers)
                     if (part.type === 'reasoning') {
-                         return (
-                            <div key={`${message.id}-part-${index}`} className="w-full border rounded-lg overflow-hidden bg-muted/20 text-xs mb-2">
-                                <div className="px-3 py-1.5 bg-muted/40 text-muted-foreground italic flex items-center gap-2">
-                                    <Bot className="w-3 h-3" />
-                                    Thought Process
-                                </div>
-                                <div className="p-3 whitespace-pre-wrap text-muted-foreground font-mono">
-                                    {part.text || ""}
-                                </div>
-                            </div>
-                         );
+                      const { phase, cleanContent } = parsePhaseFromContent(part.text || "");
+                      return renderPhaseBlock(phase, cleanContent, `${message.id}-part-${index}`);
                     }
 
-                    // Check for tool invocation (dynamic or tool-NAME)
-                    if (part.type === 'dynamic-tool' || part.type.startsWith('tool-') || part.toolCallId) {
-                        const toolName = part.toolName || (part.type.startsWith('tool-') ? part.type.replace('tool-', '') : 'tool');
-                        const args = part.input || part.args; // standard naming is input, previous was args
-                        const result = part.output || part.result;
-                        const state = part.state; // 'input-streaming', 'input-available', 'output-available', 'output-error'
-                        
-                        const isRunning = state === 'input-streaming' || state === 'input-available' || (!result && !part.errorText);
-
-                        return (
-                            <div
-                            key={part.toolCallId || `${message.id}-tool-${index}`}
-                            className="w-full border rounded-lg overflow-hidden bg-muted/30 text-sm mt-2"
-                            >
-                            {/* Tool Header */}
-                            <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 border-b">
-                                <Terminal className="w-4 h-4 text-muted-foreground" />
-                                <span className="font-medium text-xs">
-                                {toolName}
-                                </span>
-                                {isRunning && (
-                                <Loader2 className="w-3 h-3 animate-spin ml-auto text-muted-foreground" />
-                                )}
-                            </div>
-
-                            {/* Command / Input */}
-                            <div className="px-3 py-2 font-mono text-xs bg-black/5 dark:bg-white/5">
-                                <span className="text-muted-foreground select-none">$ </span>
-                                <span>{JSON.stringify(args)}</span>
-                            </div>
-
-                            {/* Result */}
-                            {result && (
-                                <div className="px-3 py-2 border-t">
-                                <div className="text-xs font-semibold text-muted-foreground mb-1">
-                                    Output:
-                                </div>
-                                <div className="max-h-60 overflow-y-auto w-full text-xs font-mono bg-black/5 dark:bg-white/5 p-2 rounded whitespace-pre-wrap break-all">
-                                    {typeof result === 'string'
-                                    ? result
-                                    : JSON.stringify(result, null, 2)}
-                                </div>
-                                </div>
-                            )}
-                             {part.errorText && (
-                                <div className="px-3 py-2 border-t bg-destructive/10 text-destructive text-xs">
-                                    Error: {part.errorText}
-                                </div>
-                             )}
-                            </div>
-                        );
+                    // Tool invocation
+                    if (part.type === 'tool-invocation' || part.toolCallId) {
+                      return renderToolInvocation(part, message.id, index);
                     }
-                    
+
                     return null;
                   })}
+
+                  {/* Fallback for simple content */}
+                  {!message.parts && message.content && (
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                  )}
                 </div>
 
-                {message.role === 'user' && (
-                  <Avatar className="w-8 h-8 border-2 border-muted mt-1">
-                    <AvatarFallback className="bg-muted">
-                      <User className="w-4 h-4" />
+                {/* User Avatar */}
+                {isUser && (
+                  <Avatar className="h-8 w-8 flex-shrink-0 border shadow-sm">
+                    <AvatarFallback className="bg-gradient-to-br from-blue-500 to-blue-600 text-white text-xs">
+                      <User className="h-4 w-4" />
                     </AvatarFallback>
                   </Avatar>
                 )}
@@ -238,22 +526,47 @@ export function ChatInterface() {
             );
           })}
 
-           <div ref={scrollRef} />
+          {/* Loading indicator */}
+          {isLoading && (
+            <div className="flex gap-3 justify-start">
+              <Avatar className="h-8 w-8 flex-shrink-0 border shadow-sm">
+                <AvatarFallback className="bg-gradient-to-br from-primary/80 to-primary text-primary-foreground text-xs">
+                  <Bot className="h-4 w-4" />
+                </AvatarFallback>
+              </Avatar>
+              <div className="bg-muted/50 border rounded-lg p-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Processing...</span>
+              </div>
+            </div>
+          )}
+
+          <div ref={scrollRef} />
         </div>
       </ScrollArea>
 
-      <form onSubmit={handleFormSubmit} className="p-4 border-t bg-background">
+      {/* Input Form */}
+      <form onSubmit={handleFormSubmit} className="p-4 border-t bg-background/50 backdrop-blur-sm">
         <div className="flex gap-2">
-            <Input
-              value={inputValue}
-              onChange={handleInputChange}
-              placeholder="Ask the DevOps agent to run a command..."
-              className="flex-1"
-              autoFocus
-            />
-            <Button type="submit" disabled={isLoading || !inputValue.trim()}>
-                <Send className="w-4 h-4" />
-            </Button>
+          <Input
+            value={inputValue}
+            onChange={handleInputChange}
+            placeholder="Ask the agent to plan, execute, reflect, and revise..."
+            disabled={isLoading}
+            className="flex-1"
+          />
+          <Button 
+            type="submit" 
+            disabled={isLoading || !inputValue.trim()}
+            size="icon"
+            className="bg-primary hover:bg-primary/90"
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </Button>
         </div>
       </form>
     </div>
