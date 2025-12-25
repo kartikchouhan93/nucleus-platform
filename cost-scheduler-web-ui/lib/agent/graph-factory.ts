@@ -1,5 +1,5 @@
 import { BaseMessage, AIMessage, SystemMessage, HumanMessage } from "@langchain/core/messages";
-import { StateGraph, StateGraphArgs, START, END, MemorySaver } from "@langchain/langgraph";
+import { StateGraph, StateGraphArgs, START, END } from "@langchain/langgraph";
 import { ChatBedrockConverse } from "@langchain/aws";
 import {
     executeCommandTool,
@@ -11,10 +11,13 @@ import {
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 
 // --- State Definition ---
-// Shared checkpointer for the session (in a real app, use a database like PostgresSaver)
+import { FileSaver } from "./file-saver";
+
+// --- State Definition ---
+// Shared checkpointer for the session (backed by file system)
 // Usage of globalThis ensures the checkpointer survives Next.js hot reloads in dev mode
-const globalForCheckpointer = globalThis as unknown as { checkpointer: MemorySaver };
-const checkpointer = globalForCheckpointer.checkpointer || new MemorySaver();
+const globalForCheckpointer = globalThis as unknown as { checkpointer: FileSaver };
+const checkpointer = globalForCheckpointer.checkpointer || new FileSaver();
 if (process.env.NODE_ENV !== "production") globalForCheckpointer.checkpointer = checkpointer;
 
 export interface PlanStep {

@@ -21,11 +21,11 @@ const connectionFilters = [
 /**
  * Server component that fetches accounts data from DynamoDB
  */
-export default async function AccountsPage({ searchParams}: { searchParams: SearchParams }) {``
-  searchParams = await searchParams;
-  const statusFilter = typeof searchParams.status === 'string' ? searchParams.status : 'all';
-  const connectionFilter = typeof searchParams.connection === 'string' ? searchParams.connection : 'all';
-  const searchTerm = typeof searchParams.search === 'string' ? searchParams.search : '';
+export default async function AccountsPage({ searchParams}: { searchParams: SearchParams }) {
+  const resolvedSearchParams = await searchParams;
+  const statusFilter = typeof resolvedSearchParams.status === 'string' ? resolvedSearchParams.status : 'all';
+  const connectionFilter = typeof resolvedSearchParams.connection === 'string' ? resolvedSearchParams.connection : 'all';
+  const searchTerm = typeof resolvedSearchParams.search === 'string' ? resolvedSearchParams.search : '';
   // Fetch filtered accounts from DynamoDB on the server side
   const { accounts } = await getAccounts({
     statusFilter,

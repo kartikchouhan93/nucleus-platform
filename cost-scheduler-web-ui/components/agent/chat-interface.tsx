@@ -110,8 +110,12 @@ const phaseConfig: Record<AgentPhase, {
   },
 };
 
-export function ChatInterface() {
-  const [threadId] = useState(() => Date.now().toString());
+interface ChatInterfaceProps {
+  threadId: string;
+}
+
+export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps) {
+  const [threadId] = useState(initialThreadId);
   
   // Configuration state (before conversation starts)
   const [autoApprove, setAutoApprove] = useState(true);
@@ -143,6 +147,16 @@ export function ChatInterface() {
       console.error('[ChatInterface] Chat error:', error);
     },
   }) as any;
+
+  // Reset state when threadId changes results in a new instance (handled by parent key),
+  // but if we reuse component, we might need effect.
+  // Actually, standard pattern is to use key={threadId} on the component in parent.
+  // So we don't need complex reset logic here if parent handles it.
+  
+  useEffect(() => {
+    // If we kept the same component instance but prop changed, we should probably reset or fetch history.
+    // For now, parent `key` prop approach is safest.
+  }, [initialThreadId]);
 
   useEffect(() => {
     console.log('[ChatInterface] Messages State Updated:', messages);

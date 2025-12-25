@@ -7,12 +7,40 @@ export const maxDuration = 300; // 5 minutes for complex multi-iteration tasks
 // Phase types for UI segregation
 type AgentPhase = 'planning' | 'execution' | 'reflection' | 'revision' | 'final' | 'text';
 
+interface Message {
+    role: string;
+    content: string;
+    toolCallId?: string;
+    toolInvocations?: Array<{
+        toolName: string;
+        args: Record<string, unknown>;
+        toolCallId: string;
+    }>;
+    parts?: Array<{
+        type: string;
+        text: string;
+    }>;
+}
+
 export async function POST(req: Request) {
     try {
-        let { messages, threadId, autoApprove = true, model } = await req.json();
+        const { messages, threadId: requestThreadId, autoApprove = true, model } = await req.json();
+        const threadId = requestThreadId || Date.now().toString();
 
-        if (!threadId) {
-            threadId = Date.now().toString();
+        // Ensure thread exists in store
+        // We do this asynchronously to not block the chat start, or we can await it.
+        // Importing dynamically to avoid circular deps if any, but regular import is fine.
+        const { threadStore } = await import('@/lib/store/thread-store');
+        const existing = await threadStore.getThread(threadId);
+        if (!existing) {
+            const firstUserMsg = messages.find((m: Message) => m.role === 'user');
+            const title = firstUserMsg?.content
+                ? (typeof firstUserMsg.content === 'string' ? firstUserMsg.content.slice(0, 30) : "New Conversation")
+                : "New Chat";
+            await threadStore.createThread(threadId, title, model);
+        } else if (model) {
+            // Update model if changed?
+            // await threadStore.updateThread(threadId, { model });
         }
 
         console.log(`[API] Thread ID: ${threadId}, Auto-Approve: ${autoApprove}, Model: ${model?.substring(0, 30)}...`);
@@ -24,7 +52,7 @@ export async function POST(req: Request) {
         });
 
         const lastMessage = messages[messages.length - 1];
-        let input: any = null;
+        let input: { messages: (HumanMessage | AIMessage | ToolMessage)[] } | null = null;
         const config = { configurable: { thread_id: threadId } };
 
         if (lastMessage.role === 'tool') {
@@ -42,7 +70,7 @@ export async function POST(req: Request) {
             else {
                 console.log(`[API] [Thread: ${threadId}] User Provided Result - Skipping real tool. Content: "${lastMessage.content.substring(0, 20)}..."`);
                 const toolMessage = new ToolMessage({
-                    tool_call_id: lastMessage.toolCallId,
+                    tool_call_id: lastMessage.toolCallId || '',
                     content: lastMessage.content
                 });
                 await graph.updateState(config, { messages: [toolMessage] });
@@ -67,12 +95,12 @@ export async function POST(req: Request) {
             }
 
             // Convert Vercel AI SDK messages to LangChain messages
-            const validMessages = messagesToProcess.map((m: any) => {
+            const validMessages = messagesToProcess.map((m: Message) => {
                 let content = m.content;
                 if (!content && m.parts) {
                     content = m.parts
-                        .filter((p: any) => p.type === 'text')
-                        .map((p: any) => p.text)
+                        .filter((p) => p.type === 'text')
+                        .map((p) => p.text)
                         .join('');
                 }
                 content = content || "";
@@ -80,11 +108,11 @@ export async function POST(req: Request) {
                 if (m.role === 'user') {
                     return new HumanMessage({ content });
                 } else if (m.role === 'assistant') {
-                    const toolCalls = m.toolInvocations?.map((ti: any) => ({
+                    const toolCalls = m.toolInvocations?.map((ti) => ({
                         name: ti.toolName,
                         args: ti.args,
                         id: ti.toolCallId,
-                        type: "tool_call"
+                        type: "tool_call" as const
                     })) || [];
 
                     return new AIMessage({
@@ -93,7 +121,7 @@ export async function POST(req: Request) {
                     });
                 } else if (m.role === 'tool') {
                     return new ToolMessage({
-                        tool_call_id: m.toolCallId,
+                        tool_call_id: m.toolCallId || '',
                         content: content
                     });
                 }
@@ -163,7 +191,30 @@ function getPhaseMarker(phase: AgentPhase): string {
     }
 }
 
-function processStream(stream: any, autoApprove: boolean): ReadableStream<UIMessageChunk> {
+interface StreamEvent {
+    event: string;
+    metadata?: {
+        langgraph_node?: string;
+    };
+    data?: {
+        chunk?: {
+            content: string | Array<{ type: string; text: string }>;
+        };
+        output?: {
+            tool_calls?: Array<{
+                id?: string;
+                name: string;
+                args: Record<string, unknown>;
+            }>;
+        };
+        name?: string;
+        id?: string;
+        input?: Record<string, unknown>;
+        args?: Record<string, unknown>;
+    };
+}
+
+function processStream(stream: AsyncIterable<StreamEvent>, autoApprove: boolean): ReadableStream<UIMessageChunk> {
     return new ReadableStream({
         async start(controller) {
             let partCounter = 0;
@@ -172,7 +223,7 @@ function processStream(stream: any, autoApprove: boolean): ReadableStream<UIMess
             let currentPhase: AgentPhase = 'text';
             let activeNode: string = "";
 
-            const safeEnqueue = (chunk: any) => {
+            const safeEnqueue = (chunk: UIMessageChunk) => {
                 try {
                     controller.enqueue(chunk);
                 } catch (e) {
@@ -189,7 +240,7 @@ function processStream(stream: any, autoApprove: boolean): ReadableStream<UIMess
                         if (event.event === "on_chat_model_start") {
                             const node = event.metadata?.langgraph_node;
                             activeNode = node || "";
-                            currentPhase = getPhaseFromNode(node);
+                            currentPhase = getPhaseFromNode(node || "");
 
                             partCounter++;
                             currentPartId = partCounter.toString();
@@ -198,35 +249,35 @@ function processStream(stream: any, autoApprove: boolean): ReadableStream<UIMess
                             // Use 'reasoning' type for all phases except final text
                             const chunkType = currentPhase !== 'text' ? 'reasoning' : 'text';
 
-                            if (!safeEnqueue({ type: `${chunkType}-start` as any, id: currentPartId })) break;
+                            if (!safeEnqueue({ type: `${chunkType}-start` as 'reasoning-start' | 'text-start', id: currentPartId })) break;
                             streamStarted = true;
 
                             // Inject phase marker
                             const phaseMarker = getPhaseMarker(currentPhase);
                             if (phaseMarker && streamStarted) {
                                 safeEnqueue({
-                                    type: `${chunkType}-delta` as any,
+                                    type: `${chunkType}-delta` as 'reasoning-delta' | 'text-delta',
                                     id: currentPartId,
                                     delta: phaseMarker,
                                 });
                             }
                         }
                         else if (event.event === "on_chat_model_stream") {
-                            const content = event.data.chunk.content;
+                            const content = event.data?.chunk?.content;
                             let text = "";
                             if (typeof content === "string") {
                                 text = content;
                             } else if (Array.isArray(content)) {
                                 text = content
-                                    .filter((c: any) => c.type === 'text')
-                                    .map((c: any) => c.text)
+                                    .filter((c) => c.type === 'text')
+                                    .map((c) => c.text)
                                     .join('');
                             }
 
                             if (text && streamStarted) {
                                 const chunkType = currentPhase !== 'text' ? 'reasoning' : 'text';
                                 if (!safeEnqueue({
-                                    type: `${chunkType}-delta` as any,
+                                    type: `${chunkType}-delta` as 'reasoning-delta' | 'text-delta',
                                     id: currentPartId,
                                     delta: text,
                                 })) break;
@@ -235,7 +286,7 @@ function processStream(stream: any, autoApprove: boolean): ReadableStream<UIMess
                         else if (event.event === "on_chat_model_end") {
                             if (streamStarted) {
                                 const chunkType = currentPhase !== 'text' ? 'reasoning' : 'text';
-                                if (!safeEnqueue({ type: `${chunkType}-end` as any, id: currentPartId })) break;
+                                if (!safeEnqueue({ type: `${chunkType}-end` as 'reasoning-end' | 'text-end', id: currentPartId })) break;
                                 streamStarted = false;
                             }
 
@@ -270,36 +321,40 @@ function processStream(stream: any, autoApprove: boolean): ReadableStream<UIMess
                             }
                         }
                         else if (event.event === "on_tool_start") {
-                            const { name, id } = event.data;
+                            const { name, id } = event.data || {};
                             console.log(`[Stream] Tool starting: ${name}`);
 
                             // When auto-approve is ON, emit tool events for display
                             if (autoApprove && id) {
-                                const args = event.data.input || event.data.args;
+                                const args = event.data?.input || event.data?.args;
 
                                 if (!safeEnqueue({
                                     type: "tool-input-start",
                                     toolCallId: id,
-                                    toolName: name,
+                                    toolName: name || '',
                                 })) break;
 
                                 if (!safeEnqueue({
                                     type: "tool-input-available",
                                     toolCallId: id,
-                                    toolName: name,
-                                    input: args,
+                                    toolName: name || '',
+                                    input: args || {},
                                 })) break;
                             }
                         }
                         else if (event.event === "on_tool_end") {
-                            const { output, id } = event.data;
+                            const { output, id } = event.data || {};
                             console.log(`[Stream] Tool completed: ${id}`);
 
                             if (id) {
+                                const outputContent = typeof output === 'object' && output !== null && 'content' in output 
+                                    ? (output as { content: string }).content 
+                                    : output || "";
+                                
                                 if (!safeEnqueue({
                                     type: "tool-output-available",
                                     toolCallId: id,
-                                    output: output?.content || output || "",
+                                    output: outputContent,
                                 })) break;
                             }
                         }
@@ -313,12 +368,16 @@ function processStream(stream: any, autoApprove: boolean): ReadableStream<UIMess
 
                 try {
                     controller.close();
-                } catch (e) { }
+                } catch (e) { 
+                    // Controller already closed
+                }
             } catch (error) {
                 console.error("Stream processing loop error:", error);
                 try {
                     controller.error(error);
-                } catch (e) { }
+                } catch (e) { 
+                    // Controller already errored
+                }
             }
         }
     });

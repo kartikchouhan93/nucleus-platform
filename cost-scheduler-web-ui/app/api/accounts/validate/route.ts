@@ -4,7 +4,7 @@ import { AccountService } from '@/lib/account-service';
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { roleArn, externalId, region, accountId } = body;
+        const { roleArn, externalId, region } = body;
 
         console.log(`API - Validating credentials for ${roleArn} (ExternalID: ${externalId ? 'Provided' : 'None'})`);
 

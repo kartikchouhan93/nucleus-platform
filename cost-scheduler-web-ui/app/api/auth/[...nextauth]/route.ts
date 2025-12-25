@@ -1,6 +1,5 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CognitoProvider from "next-auth/providers/cognito";
-import { JWT } from "next-auth/jwt";
 
 export const authOptions: NextAuthOptions = {
     providers: [
