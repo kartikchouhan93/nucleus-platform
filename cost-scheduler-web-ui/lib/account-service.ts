@@ -4,7 +4,7 @@ import { getDynamoDBDocumentClient, APP_TABLE_NAME, handleDynamoDBError, DEFAULT
 import { AccountMetadata, UIAccount } from './types';
 import { AuditService } from './audit-service';
 import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
-import { ECSClient, ListClustersCommand } from '@aws-sdk/client-ecs';
+import { ECSClient, ListClustersCommand, ListServicesCommand, DescribeServicesCommand } from '@aws-sdk/client-ecs';
 import { RDSClient, DescribeDBInstancesCommand } from '@aws-sdk/client-rds';
 import { EC2Client, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
 
@@ -548,7 +548,7 @@ export class AccountService {
     /**
      * Scan resources (EC2, ECS, RDS) for a given account
      */
-    static async scanResources(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string }>> {
+    static async scanResources(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string; clusterArn?: string }>> {
         try {
             console.log(`AccountService - Scanning resources for account: ${accountId}`);
 
@@ -578,7 +578,7 @@ export class AccountService {
                 sessionToken: stsResponse.Credentials.SessionToken!,
             };
 
-            const resources: Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string }> = [];
+            const resources: Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string; clusterArn?: string }> = [];
 
             // 2. Scan EC2
             try {
@@ -601,22 +601,50 @@ export class AccountService {
                 console.error('Error scanning EC2:', e);
             }
 
-            // 3. Scan ECS
+            // 3. Scan ECS Services (not clusters)
             try {
                 const ecsClient = new ECSClient({ region, credentials });
-                // Note: ListClusters only returns ARNs
-                const ecsResponse = await ecsClient.send(new ListClustersCommand({}));
-                ecsResponse.clusterArns?.forEach(arn => {
-                    const name = arn.split('/').pop() || arn;
-                    resources.push({
-                        id: name,
-                        type: 'ecs',
-                        name: name,
-                        arn: arn // ListClusters returns full ARN
-                    });
-                });
+
+                // First, get all clusters
+                const clustersResponse = await ecsClient.send(new ListClustersCommand({}));
+                const clusterArns = clustersResponse.clusterArns || [];
+
+                // For each cluster, list its services
+                for (const clusterArn of clusterArns) {
+                    const clusterName = clusterArn.split('/').pop() || clusterArn;
+
+                    try {
+                        const servicesResponse = await ecsClient.send(new ListServicesCommand({
+                            cluster: clusterArn,
+                        }));
+
+                        const serviceArns = servicesResponse.serviceArns || [];
+
+                        if (serviceArns.length > 0) {
+                            // Get service details for display name and state info
+                            const describeResponse = await ecsClient.send(new DescribeServicesCommand({
+                                cluster: clusterArn,
+                                services: serviceArns,
+                            }));
+
+                            describeResponse.services?.forEach(service => {
+                                if (service.serviceArn && service.serviceName) {
+                                    resources.push({
+                                        id: service.serviceName,
+                                        type: 'ecs',
+                                        name: `${clusterName}/${service.serviceName}`,
+                                        arn: service.serviceArn,
+                                        clusterArn: clusterArn, // Include cluster ARN for scheduler
+                                    });
+                                }
+                            });
+                        }
+                    } catch (serviceError) {
+                        console.error(`Error scanning ECS services in cluster ${clusterName}:`, serviceError);
+                    }
+                }
             } catch (e) {
-                console.error('Error scanning ECS:', e);
+                console.error('Error scanning ECS clusters:', e);
             }
 
             // 4. Scan RDS

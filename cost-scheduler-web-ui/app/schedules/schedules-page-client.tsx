@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Plus, Filter, RefreshCw, AlertCircle, Calendar } from "lucide-react";
+import { Plus, Filter, RefreshCw, AlertCircle, Calendar, Settings } from "lucide-react";
 import { SchedulesTable } from "@/components/schedules/schedules-table";
 import { SchedulesGrid } from "@/components/schedules/schedules-grid";
 import { BulkActionsDialog } from "@/components/schedules/bulk-actions-dialog";
@@ -245,6 +245,9 @@ export function SchedulesPageClient({
           </p>
         </div>
         <div className="flex items-center justify-end space-x-2">
+          <Button variant="outline" size="icon" onClick={() => router.push("/schedules/settings")} title="Scheduler Settings">
+            <Settings className="h-4 w-4" />
+          </Button>
           <Button variant="outline" onClick={refreshSchedules}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh

@@ -15,6 +15,7 @@ export interface Schedule {
         type: 'ec2' | 'ecs' | 'rds';
         name?: string;
         arn?: string; // AWS ARN for the resource
+        clusterArn?: string; // ECS cluster ARN (for ECS services)
     }>;
     lastExecution?: string;
     executionCount?: number;

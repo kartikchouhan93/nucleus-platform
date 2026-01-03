@@ -257,6 +257,21 @@ export class WebUIStack extends cdk.Stack {
             })
         );
 
+        // Add EventBridge permissions for scheduler settings management
+        webUILambdaExecutionRole.addToPolicy(
+            new iam.PolicyStatement({
+                effect: iam.Effect.ALLOW,
+                actions: [
+                    "events:DescribeRule",
+                    "events:PutRule",
+                    "events:ListRules"
+                ],
+                resources: [
+                    `arn:aws:events:${this.region}:${this.account}:rule/${SCHEDULER_NAME}-rule`,
+                ],
+            })
+        );
+
         // ============================================================================
         // COGNITO AUTHENTICATION SETUP
         // ============================================================================
@@ -513,6 +528,8 @@ export class WebUIStack extends cdk.Stack {
                 DATA_DIR: '/tmp',
                 // Scheduler Lambda ARN for ad-hoc execution
                 SCHEDULER_LAMBDA_ARN: props?.schedulerLambdaArn || '',
+                // EventBridge rule name for scheduler settings
+                EVENTBRIDGE_RULE_NAME: `${SCHEDULER_NAME}-rule`,
             },
             role: webUILambdaExecutionRole,
             timeout: cdk.Duration.seconds(300),
