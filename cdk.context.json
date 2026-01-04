@@ -1,4 +1,5 @@
 {
+  "appName": "nucleus-app",
   "awsAccountId": "044656767899",
   "awsRegion": "us-east-1",
   "customDomain": {
@@ -7,11 +8,19 @@
     "certificateArn": "arn:aws:acm:us-east-1:0000000000000:certificate/40e55aff-447b-4953-b0d9-4655f3c963a4",
     "fallbackDomainName": "https://d1wep6a714kqli.cloudfront.net"
   },
-  "scheduler": {
-    "name": "cost-optimization-scheduler",
-    "scheduleInterval": 30,
-    "crossAccountRoleName": "CrossAccountRoleForCostOptimizationScheduler",
-    "schedulerTag": "cost-optimization-scheduler"
+  "networking": {
+    "vpcCidr": "10.0.0.0/16",
+    "maxAzs": 2,
+    "natGateways": 2
+  },
+  "ecs": {
+    "webUi": {
+      "cpu": 512,
+      "memory": 1024,
+      "desiredCount": 2,
+      "minCapacity": 2,
+      "maxCapacity": 10
+    }
   },
   "subscriptionEmails": [
     "kartikmanimuthu@smcindiaonline.com",
@@ -20,5 +29,13 @@
   "acknowledged-issue-numbers": [
     34892,
     32775
+  ],
+  "availability-zones:account=044656767899:region=us-east-1": [
+    "us-east-1a",
+    "us-east-1b",
+    "us-east-1c",
+    "us-east-1d",
+    "us-east-1e",
+    "us-east-1f"
   ]
 }

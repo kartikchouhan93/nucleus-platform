@@ -19,7 +19,7 @@ export async function GET() {
     const healthCheck: HealthCheck = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        service: 'cost-scheduler-web-ui',
+        service: 'web-ui',
         environment: process.env.NODE_ENV || 'development',
         aws: {
             region: process.env.AWS_REGION || process.env.NEXT_PUBLIC_AWS_REGION,

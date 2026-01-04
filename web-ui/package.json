@@ -7,11 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "deploy": "cdk deploy WebUIStack",
-    "deploy:dev": "cdk deploy WebUIStack --profile dev",
-    "deploy:prod": "cdk deploy WebUIStack --profile prod",
-    "docker:build": "docker build -t cost-scheduler-web-ui .",
-    "docker:run": "docker run -p 3000:3000 cost-scheduler-web-ui"
+    "deploy": "npx cdk deploy WebUIStack"
   },
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "^3.0.71",

@@ -8,6 +8,8 @@
     ],
     "declaration": true,
     "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
     "noImplicitThis": true,
@@ -26,6 +28,8 @@
   },
   "exclude": [
     "node_modules",
-    "cdk.out"
+    "cdk.out",
+    "web-ui",
+    "lambda"
   ]
 }

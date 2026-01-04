@@ -1,0 +1,83 @@
+FROM public.ecr.aws/docker/library/node:20.9.0-slim AS deps
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm ci --only=production --omit=dev --legacy-peer-deps && \
+    npm cache clean --force
+
+FROM public.ecr.aws/docker/library/node:20.9.0-slim AS builder
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies for build
+RUN npm ci --legacy-peer-deps && \
+    npm cache clean --force
+
+# Copy source code
+COPY . .
+
+# Set Next.js environment for standalone build
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_SHARP_PATH=/tmp/node_modules/sharp
+
+# Set build-time environment variables
+ENV NEXT_PUBLIC_AWS_REGION=ap-south-1
+ENV NEXT_PUBLIC_APP_TABLE_NAME=NucleusAppTable
+ENV NEXT_PUBLIC_AUDIT_TABLE_NAME=NucleusAuditTable
+ENV NEXT_PUBLIC_AWS_USE_STS=true
+
+# Build the application
+RUN npm run build
+
+FROM public.ecr.aws/docker/library/node:20.9.0-slim AS runner
+WORKDIR /app
+
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV PORT=3000 \
+    HOSTNAME="0.0.0.0" \
+    NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    NEXTAUTH_SECRET='iojifjifjfijffjijiehyudfytwfdtrdreswrsrxedctfvygbuhnjmk' \
+    NEXT_PUBLIC_AWS_REGION=ap-south-1 \
+    NEXT_PUBLIC_APP_TABLE_NAME=NucleusAppTable \
+    NEXT_PUBLIC_AUDIT_TABLE_NAME=NucleusAuditTable \
+    NEXT_PUBLIC_AWS_USE_STS=true \
+    NEXT_PUBLIC_TESTING1='testing1'
+
+# Create necessary directories
+RUN mkdir -p /tmp/cache && \
+    mkdir -p .next/cache
+
+# Copy built application assets
+COPY --from=builder /app/public ./public
+# Copy package.json for potential usage or metadata
+COPY --from=builder /app/package.json ./package.json
+
+# Copy standalone build output
+# This places server.js and necessary node_modules in /app
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+
+# Create symbolic link for cache
+RUN ln -sf /tmp/cache ./.next/cache
+
+# Set proper permissions
+RUN chown -R node:node /app /tmp/cache
+
+# Switch to non-root user
+USER node
+
+# Expose port
+EXPOSE 3000
+
+# Start the application
+CMD ["node", "server.js"]

@@ -21,10 +21,11 @@ export class CdkStack extends cdk.Stack {
     // Environment variables
     // *******************************************************************
 
-    const SCHEDULER_NAME = this.node.tryGetContext('scheduler').name;
-    const SCHEDULE_INTERVAL = this.node.tryGetContext('scheduler').scheduleInterval;
-    const CROSS_ACCOUNT_ROLE_NAME = this.node.tryGetContext('scheduler').crossAccountRoleName;
-    const SCHEDULER_TAG = this.node.tryGetContext('scheduler').schedulerTag;
+    const appName = this.node.tryGetContext('appName') || 'nucleus-app';
+    const SCHEDULER_NAME = appName;
+    const SCHEDULE_INTERVAL = 30; // Defaulting to 30 as context is being removed
+    const CROSS_ACCOUNT_ROLE_NAME = 'CrossAccountRoleForCostOptimizationScheduler';
+    const SCHEDULER_TAG = 'cost-optimization-scheduler';
     const subscriptionEmails = this.node.tryGetContext('subscriptionEmails');
 
     // Generate schedule expression based on the interval
@@ -37,7 +38,7 @@ export class CdkStack extends cdk.Stack {
     const stackName = `${SCHEDULER_NAME}`;
 
     // 1. Nucleus App Table (Single Table Design)
-    const appTable = new dynamodb.Table(this, 'NucleusAppTable', {
+    const appTable = new dynamodb.Table(this, `${appName}-AppTable`, {
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,

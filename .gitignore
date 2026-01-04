@@ -6,7 +6,7 @@ cdk.out/
 node_modules/
 
 # TypeScript compilation output
-# *.js
+*.js
 *.d.ts
 
 # Logs

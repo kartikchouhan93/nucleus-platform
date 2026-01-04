@@ -325,6 +325,7 @@ export default function SchedulesClient({
               Search and filter schedules to find what you need
             </CardDescription>
           </CardHeader>
+          <CardContent>
             <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1">
                 <Input

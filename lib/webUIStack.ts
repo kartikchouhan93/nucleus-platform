@@ -29,7 +29,8 @@ export class WebUIStack extends cdk.Stack {
         super(scope, id, props);
 
         // Context and Configuration
-        const SCHEDULER_NAME = this.node.tryGetContext('scheduler')?.name || 'cost-scheduler';
+        const appName = this.node.tryGetContext('appName') || 'nucleus-app';
+        const SCHEDULER_NAME = appName;
         const stackName = `${SCHEDULER_NAME}-web-ui`;
         const customDomainConfig = this.node.tryGetContext('customDomain');
 
@@ -473,7 +474,7 @@ export class WebUIStack extends cdk.Stack {
             functionName: `${stackName}-server`,
             runtime: lambda.Runtime.FROM_IMAGE,
             handler: lambda.Handler.FROM_IMAGE,
-            code: lambda.Code.fromAssetImage(path.join(__dirname, "../cost-scheduler-web-ui"), {
+            code: lambda.Code.fromAssetImage(path.join(__dirname, "../web-ui"), {
                 cmd: ["sh", "-c", "exec node server.js"],
                 platform: Platform.LINUX_ARM64,
             }),
