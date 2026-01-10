@@ -5,3 +5,6 @@ export BUILDX_NO_DEFAULT_ATTESTATIONS=1
 
 
 AWS_PROFILE=STX-APPLICATION-PLATFORM-NON-PROD-ADMIN  npx cdk deploy --all --require-approval never
+
+
+kill -9 $(lsof -t -i:3000 -sTCP:LISTEN)

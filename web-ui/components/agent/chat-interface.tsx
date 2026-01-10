@@ -130,6 +130,11 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
   const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id);
   const [agentMode, setAgentMode] = useState('plan');
   const [hasStarted, setHasStarted] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [wasStopped, setWasStopped] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const streamTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastMessageContentRef = useRef<string>('');
   
   // AWS Account selection state
   const [accounts, setAccounts] = useState<UIAccount[]>([]);
@@ -165,6 +170,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
     isLoading, 
     setMessages,
     addToolResult,
+    stop,
   } = useChat({
     api: '/api/chat',
     maxSteps: 10,
@@ -188,22 +194,74 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
     },
   }) as any;
 
-  // Reset state when threadId changes results in a new instance (handled by parent key),
-  // but if we reuse component, we might need effect.
-  // Actually, standard pattern is to use key={threadId} on the component in parent.
-  // So we don't need complex reset logic here if parent handles it.
-  
+  // Fetch conversation history when component mounts (for existing threads)
   useEffect(() => {
-    // If we kept the same component instance but prop changed, we should probably reset or fetch history.
-    // For now, parent `key` prop approach is safest.
-  }, [initialThreadId]);
+    async function fetchHistory() {
+      // Only fetch if this looks like an existing thread (not a new timestamp-based ID)
+      // We attempt to fetch history for all threads; if none exists, API returns empty array
+      console.log('[ChatInterface] Attempting to fetch history for thread:', threadId);
+      setIsLoadingHistory(true);
+      
+      try {
+        const res = await fetch(`/api/threads/${threadId}/history`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.messages && data.messages.length > 0) {
+            console.log('[ChatInterface] Loaded', data.messages.length, 'historical messages');
+            setMessages(data.messages);
+            setHasStarted(true);
+          } else {
+            console.log('[ChatInterface] No history found for thread');
+          }
+        } else {
+          console.warn('[ChatInterface] Failed to fetch history:', res.status);
+        }
+      } catch (error) {
+        console.error('[ChatInterface] Error fetching history:', error);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    }
+    
+    fetchHistory();
+  }, [threadId, setMessages]);
 
   useEffect(() => {
     console.log('[ChatInterface] Messages State Updated:', messages);
     if (messages.length > 0) {
       setHasStarted(true);
+      
+      // Track streaming state based on message content changes
+      const lastMessage = messages[messages.length - 1];
+      const currentContent = JSON.stringify(lastMessage);
+      
+      // If content changed, we're actively streaming
+      if (currentContent !== lastMessageContentRef.current) {
+        lastMessageContentRef.current = currentContent;
+        setIsStreaming(true);
+        
+        // Clear any existing timeout
+        if (streamTimeoutRef.current) {
+          clearTimeout(streamTimeoutRef.current);
+        }
+        
+        // Set streaming to false after 2 seconds of no updates
+        streamTimeoutRef.current = setTimeout(() => {
+          console.log('[ChatInterface] Stream appears to have ended (no updates for 2s)');
+          setIsStreaming(false);
+        }, 2000);
+      }
     }
   }, [messages]);
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (streamTimeoutRef.current) {
+        clearTimeout(streamTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const [inputValue, setInputValue] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -217,6 +275,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
   const handleClear = () => {
     setMessages([]);
     setHasStarted(false);
+    setWasStopped(false);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -237,6 +296,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
     const value = inputValue;
     setInputValue('');
     setHasStarted(true);
+    setWasStopped(false);
     
     await sendMessage({
       content: value,
@@ -251,6 +311,18 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
         accountName: selectedAccount?.name || undefined,
       }
     });
+  };
+
+  const handleStop = () => {
+    console.log('[ChatInterface] Stop button clicked, isLoading:', isLoading, 'isStreaming:', isStreaming);
+    setWasStopped(true);
+    setIsStreaming(false);
+    if (streamTimeoutRef.current) {
+      clearTimeout(streamTimeoutRef.current);
+      streamTimeoutRef.current = null;
+    }
+    stop();
+    console.log('[ChatInterface] Stop called, wasStopped set to true, isStreaming set to false');
   };
 
   // Handle tool approval - makes explicit API call to resume LangGraph execution
@@ -490,8 +562,16 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
       {/* Messages */}
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4">
+          {/* Loading history indicator */}
+          {isLoadingHistory && (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
+              <p className="text-sm text-muted-foreground">Loading conversation history...</p>
+            </div>
+          )}
+
           {/* Initial prompt suggestions when no messages */}
-          {messages.length === 0 && (
+          {messages.length === 0 && !isLoadingHistory && (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <div className="w-16 h-16 mb-4 rounded-full bg-primary/10 flex items-center justify-center">
                 <Bot className="w-8 h-8 text-primary" />
@@ -588,7 +668,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
           })}
 
           {/* Loading indicator */}
-          {isLoading && (
+          {(isLoading || isStreaming) && (
             <div className="flex gap-3 justify-start">
               <Avatar className="h-8 w-8 flex-shrink-0 border shadow-sm">
                 <AvatarFallback className="bg-gradient-to-br from-primary/80 to-primary text-primary-foreground text-xs">
@@ -598,6 +678,20 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
               <div className="bg-muted/50 border rounded-lg p-3 flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>Processing...</span>
+              </div>
+            </div>
+          )}
+
+          {/* Stopped indicator */}
+          {wasStopped && !isLoading && !isStreaming && (
+            <div className="flex gap-3 justify-start">
+              <Avatar className="h-8 w-8 flex-shrink-0 border shadow-sm">
+                <AvatarFallback className="bg-gradient-to-br from-destructive/80 to-destructive text-destructive-foreground text-xs">
+                  <X className="h-4 w-4" />
+                </AvatarFallback>
+              </Avatar>
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 flex items-center gap-2 text-sm text-destructive">
+                <span>Execution stopped by user</span>
               </div>
             </div>
           )}
@@ -707,13 +801,19 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
                 {inputValue.length}/2000
               </span>
               <Button 
-                type="submit" 
-                disabled={isLoading || !inputValue.trim()}
+                type={(isLoading || isStreaming) ? "button" : "submit"}
+                onClick={(isLoading || isStreaming) ? handleStop : undefined}
+                disabled={!(isLoading || isStreaming) && !inputValue.trim()}
                 size="icon"
-                className="h-8 w-8 rounded-full bg-primary hover:bg-primary/90 shrink-0 transition-all"
+                className={cn(
+                  "h-8 w-8 rounded-full shrink-0 transition-all",
+                  (isLoading || isStreaming) 
+                    ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" 
+                    : "bg-primary hover:bg-primary/90"
+                )}
               >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                {(isLoading || isStreaming) ? (
+                  <span className="h-2.5 w-2.5 bg-current rounded-sm" />
                 ) : (
                   <Send className="h-4 w-4 ml-0.5" />
                 )}

@@ -166,6 +166,7 @@ export async function POST(req: Request) {
                     version: "v2",
                     configurable: { thread_id: threadId },
                     recursionLimit: 100, // Higher limit for complex tasks with many tool calls
+                    signal: req.signal,
                 }
             );
 
@@ -178,6 +179,7 @@ export async function POST(req: Request) {
                 {
                     configurable: { thread_id: threadId },
                     recursionLimit: 100,
+                    signal: req.signal,
                 }
             );
 
