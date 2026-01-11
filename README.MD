@@ -1,69 +1,292 @@
-# AWS Scheduler Project Documentation
+# Nucleus Ops
 
-## Overview
+<p align="center">
+  <img src="docs/screenshots/dashboard_page.png" alt="Nucleus Ops Dashboard" width="800">
+</p>
 
-The AWS Scheduler is a robust and efficient solution designed to automate the process of turning on and off AWS instances based on specific tags. This project leverages AWS Cloud Development Kit (CDK) for infrastructure as code (IaC) to provision and manage AWS resources. The Scheduler uses a combination of AWS Lambda, DynamoDB, IAM Roles, and CloudWatch Events to perform scheduled tasks, providing a cost-effective and time-efficient way to manage instance states.
+<p align="center">
+  <strong>Enterprise-grade AWS Cost Optimization & Resource Scheduling Platform</strong>
+</p>
 
-### Key Components
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#documentation">Documentation</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#contributing">Contributing</a>
+</p>
 
-- **AWS Lambda**: Executes the scheduling logic.
-- **DynamoDB**: Stores the configuration and state of instances.
-- **IAM Roles and Policies**: Secure access to AWS services.
-- **CloudWatch Events**: Triggers Lambda functions based on specified schedules.
+---
 
-## Installation Steps
+## 🎯 What is Nucleus Ops?
+
+Nucleus Ops is a centralized platform for automating AWS resource management across multiple accounts. It helps organizations **reduce cloud costs by up to 65%** by automatically starting and stopping non-production resources based on business schedules.
+
+### The Problem
+
+- **Idle Resources**: Development and staging environments run 24/7 but are only used during business hours
+- **Manual Management**: DevOps teams spend hours manually managing resource states
+- **Multi-Account Complexity**: Enterprises struggle to coordinate schedules across dozens of AWS accounts
+- **Lack of Visibility**: No centralized view of scheduling operations and cost savings
+
+### The Solution
+
+Nucleus Ops provides:
+
+- 🕐 **Automated Scheduling**: Start/stop EC2, RDS, and ECS resources on custom schedules
+- 🌐 **Multi-Account Support**: Manage N accounts from a single pane of glass
+- 🤖 **AI-Powered Agent**: Natural language interface for cloud operations
+- 📊 **Comprehensive Auditing**: Full visibility into all actions and executions
+- 💰 **Cost Tracking**: Real-time savings estimation and reporting
+
+---
+
+## ✨ Features
+
+### 📊 Cost Optimization Dashboard
+Real-time overview of schedules, accounts, savings, and recent activity.
+
+### 🔗 AWS Account Integration
+Seamlessly connect multiple AWS accounts using secure cross-account IAM roles.
+
+![AWS Accounts](docs/screenshots/aws_accounts_page.png)
+
+### ⏰ Intelligent Scheduling
+Create flexible schedules with:
+- Customizable time windows
+- Weekday/weekend configurations
+- Timezone support
+- Multi-resource selection (EC2, RDS, ECS)
+
+### 📝 Audit Trail
+Complete audit logging with:
+- User and system action tracking
+- 30-day retention
+- Advanced filtering and search
+- Export capabilities
+
+![Audit Logs](docs/screenshots/audit_logs_page.png)
+
+### 🤖 AI DevOps Agent
+Natural language cloud management powered by Claude 4.5 Sonnet:
+- Cost analysis and reporting
+- Security audits
+- Troubleshooting assistance
+- Automated documentation
+
+![AI Agent](docs/screenshots/ai_agent_page_final.png)
+
+### 🎨 Customizable UI
+Dark/light themes, multiple color schemes, and typography options.
+
+![Settings](docs/screenshots/settings_page_final.png)
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- AWS CLI installed and configured.
-- Node.js and npm installed.
-- AWS CDK toolkit installed using `npm install -g aws-cdk`.
-- Access to an AWS account with necessary permissions.
+- Node.js 22+
+- AWS CLI configured
+- AWS CDK installed (`npm install -g aws-cdk`)
+- Access to an AWS account with admin permissions
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/nucleus-platform.git
+cd nucleus-platform
+
+# Install dependencies
+npm install
+cd web-ui && npm install && cd ..
+
+# Configure environment
+cp web-ui/.env.local.example web-ui/.env.local
+# Edit .env.local with your settings
+
+# Deploy infrastructure
+npx cdk deploy --all
+
+# Or run locally
+cd web-ui
+npm run dev
+```
 
 ### Environment Variables
 
-Before deployment, set the following environment variables:
+```bash
+# Required
+AWS_REGION=ap-south-1
+DYNAMODB_TABLE_NAME=nucleus-ops-main
+DYNAMODB_AUDIT_TABLE_NAME=nucleus-ops-audit
+NEXTAUTH_SECRET=your-secret-here
 
-- `SCHEDULER_NAME`: Name of the Scheduler (default: 'AwsScheduler').
-- `SCHEDULE_EXPRESSION`: Cron expression for schedule (default: 'cron(0 \* \* _ ? _)').
-- `SCHEDULER_TAG`: Tag to identify resources managed by the Scheduler (default: 'schedule').
+# Optional (for AI Agent)
+DYNAMODB_CHECKPOINT_TABLE=nucleus-ops-checkpoints
+DYNAMODB_WRITES_TABLE=nucleus-ops-writes
+TAVILY_API_KEY=your-tavily-key
+```
 
-### Deployment Steps
+---
 
-1. Clone the repository to your local machine.
-2. Navigate to the project directory.
-3. Run `npm install` to install dependencies.
-4. Customize the CDK stack in `lib/aws-scheduler-stack.ts` as needed.
-5. Deploy the stack using `npx cdk deploy`.
+## 📚 Documentation
 
-## Technical Description
+| Document | Description |
+|----------|-------------|
+| [Architecture Guide](docs/ARCHITECTURE.md) | Technical architecture, diagrams, and data models |
+| [Features Guide](docs/FEATURES.md) | Comprehensive feature documentation with screenshots |
+| [Product Requirements](docs/product-requirement-document.md) | Original PRD |
+| [Technical Review](docs/technical-review-document.md) | Technical decisions and rationale |
+| [Schema Design](docs/schema-design.md) | DynamoDB table design |
 
-The AWS Scheduler is designed to be highly configurable and scalable. The `AwsSchedulerStack` class in the CDK stack file defines the infrastructure setup. Here's a breakdown of the main components:
+---
 
-- **DynamoDB Table**: Serves as the data store for the scheduler's configuration and state.
-- **Lambda Function**: Contains the logic for starting and stopping instances. It's triggered as per the schedule defined in CloudWatch Events.
-- \*\*IAM Role and
+## 🏗️ Architecture
 
-Policy\*\*: Securely grants the Lambda function the necessary permissions to interact with DynamoDB and other AWS services.
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Nucleus Ops Platform                     │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │   Next.js    │  │   LangGraph  │  │  Lambda Scheduler │  │
+│  │   Web UI     │  │   AI Agent   │  │   (EventBridge)   │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+│           │                │                    │           │
+│           └────────────────┼────────────────────┘           │
+│                            │                                 │
+│                   ┌────────▼────────┐                       │
+│                   │    DynamoDB     │                       │
+│                   │  (Single Table) │                       │
+│                   └─────────────────┘                       │
+└─────────────────────────────────────────────────────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │   AWS STS       │
+                    │  AssumeRole     │
+                    └────────┬────────┘
+                             │
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+┌───────▼───────┐   ┌────────▼────────┐  ┌───────▼───────┐
+│  AWS Account  │   │   AWS Account   │  │  AWS Account  │
+│      A        │   │       B         │  │      C        │
+│  (EC2, RDS)   │   │   (ECS, RDS)    │  │     (EC2)     │
+└───────────────┘   └─────────────────┘  └───────────────┘
+```
 
-- **CloudWatch Event Rule**: Defines the triggering mechanism for the Lambda function based on the specified schedule.
+### Technology Stack
 
-The Lambda function is central to this setup. It queries DynamoDB to determine which instances need to be started or stopped based on their tags and the current time. The function then performs the required start or stop action on each instance.
+| Layer | Technologies |
+|-------|--------------|
+| **Frontend** | Next.js 15, React 19, Tailwind CSS, Radix UI |
+| **Backend** | Node.js, AWS SDK v3, LangGraph, LangChain |
+| **AI** | AWS Bedrock (Claude 4.5 Sonnet) |
+| **Database** | Amazon DynamoDB (Single Table Design) |
+| **Infrastructure** | AWS CDK, Lambda, ECS Fargate, CloudFront |
+| **Auth** | NextAuth.js, AWS Cognito |
 
-### CloudFormation for Cross-Account Access
+---
 
-For scenarios where the Scheduler needs to manage resources across different AWS accounts, a cross-account role is necessary. This role allows the Scheduler's Lambda function in one AWS account to perform actions on resources in another AWS account.
+## 📂 Project Structure
 
-The IAM role (`CrossAccountRoleForAwsScheduler`) should be created in the target AWS account with the necessary permissions to start and stop instances. The trust relationship of this role should allow the Lambda function's role in the Scheduler's AWS account to assume it.
+```
+nucleus-platform/
+├── bin/                    # CDK app entry point
+├── lib/                    # CDK stack definitions
+│   ├── cdkStack.ts         # Main stack
+│   ├── computeStack.ts     # ECS, ALB, CloudFront
+│   ├── networkingStack.ts  # VPC, Subnets
+│   └── webUIStack.ts       # Web UI deployment
+├── lambda/                 # Lambda functions
+│   └── scheduler/          # Scheduler execution logic
+├── web-ui/                 # Next.js application
+│   ├── app/                # App router pages
+│   ├── components/         # React components
+│   ├── lib/                # Utilities and services
+│   │   └── agent/          # AI agent implementation
+│   └── styles/             # CSS styles
+├── docs/                   # Documentation
+│   ├── ARCHITECTURE.md     # Technical architecture
+│   ├── FEATURES.md         # Feature guide
+│   └── screenshots/        # UI screenshots
+└── test/                   # Test files
+```
 
-Replace `<CrossAccountID>` with the AWS account ID where the Scheduler is deployed.
+---
 
-## Conclusion
+## 🔐 Security
 
-The AWS Scheduler is a powerful tool for automating instance management in AWS, providing both cost savings and operational efficiency. By leveraging AWS CDK
+- **Cross-Account Access**: Uses temporary credentials via `sts:AssumeRole`
+- **Least Privilege**: Minimal IAM permissions for target accounts
+- **Encryption**: DynamoDB encryption at rest (KMS)
+- **Authentication**: NextAuth.js with Cognito integration
+- **Audit Logging**: All actions recorded with 30-day retention
 
-, it offers a flexible and scalable solution that can be easily adapted to different environments and use cases. The integration of cross-account capabilities further extends its utility, making it suitable for complex AWS architectures.
+---
 
-For optimal results, it is important to thoroughly test the Scheduler in a controlled environment before deploying it in a production setting. Regular monitoring and updates are also recommended to ensure it continues to operate effectively and securely in line with AWS best practices and evolving service features.
+## 🛠️ Development
 
-This documentation provides a comprehensive guide to deploying and utilizing the AWS Scheduler. By following the steps and understanding the components involved, you can effectively manage your AWS instances and optimize resource usage and costs.
+### Running Locally
+
+```bash
+cd web-ui
+
+# With AWS profile
+AWS_PROFILE=your-profile npm run dev
+
+# Access at http://localhost:3000
+```
+
+### Deploying
+
+```bash
+# Deploy all stacks
+npx cdk deploy --all --profile your-profile
+
+# Deploy specific stack
+npx cdk deploy WebUIStack --profile your-profile
+```
+
+### Testing
+
+```bash
+# Run tests
+npm test
+
+# Lint
+cd web-ui && npm run lint
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- [AWS CDK](https://aws.amazon.com/cdk/) - Infrastructure as Code
+- [LangGraph](https://github.com/langchain-ai/langgraph) - AI Agent Framework
+- [Radix UI](https://www.radix-ui.com/) - Accessible UI Components
+- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS
+
+---
+
+<p align="center">Built with ❤️ for the cloud community</p>

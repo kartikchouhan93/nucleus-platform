@@ -147,12 +147,8 @@ Available tools:
 - get_aws_credentials(accountId): Get temporary AWS credentials for a specific account
 ${accountContext}
 
-IMPORTANT GUIDELINES:
-- You should use tools to accomplish the task if necessary. If the task is a simple question or greeting that doesn't require tools, you may answer directly.
-- Do NOT write reports, summaries, or analysis results to files unless the user explicitly asks you to save to a file.
-- Return all analysis, reports, and summaries directly in your response message - this is more efficient and allows real-time streaming to the user.
-- Only use write_file when the user explicitly requests to save something to a specific file path.
-- After using tools (or if no tools are needed), provide a brief summary of what you accomplished or the answer.`);
+IMPORTANT: You should use tools to accomplish the task if necessary. If the task is a simple question or greeting that doesn't require tools, you may answer directly.
+After using tools (or if no tools are needed), provide a brief summary of what you accomplished or the answer.`);
 
         const response = await modelWithTools.invoke([executorSystemPrompt, ...getRecentMessages(messages, 10)]);
 
@@ -317,8 +313,6 @@ Issues to Address: ${errors.join(', ') || 'None'}
 
 Use the available tools to fix problems and improve the solution.
 Focus on addressing the specific issues mentioned in the feedback.
-
-IMPORTANT: Do NOT write reports or summaries to files. Return all content directly in your response.
 
 Available tools:
 - read_file, write_file, list_directory, execute_command, web_search`);
