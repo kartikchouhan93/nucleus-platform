@@ -18,7 +18,9 @@ const AGENT_MODES = [
 ];
 
 import { useEffect, useRef, useState } from 'react';
-import { Task, TaskTrigger, TaskContent, TaskItem } from '@/components/ai-elements/task';
+import { Plan, PlanHeader, PlanContent, PlanStep } from '@/components/ai-elements/plan';
+import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { Reasoning, ReasoningTrigger, ReasoningContent } from '@/components/ai-elements/reasoning';
 import { 
   Confirmation, 
   ConfirmationRequest, 
@@ -352,14 +354,102 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
   };
 
   // Render a phase block
-  const renderPhaseBlock = (phase: AgentPhase, content: string, key: string) => {
+  const renderPhaseBlock = (phase: AgentPhase, content: string, key: string, isLastMessage: boolean = false) => {
     const config = phaseConfig[phase];
     const Icon = config.icon;
 
-    // Try to parse plan steps if it's a planning phase with numbered list
-    const planSteps = phase === 'planning' ? 
-      content.split('\n').filter(line => /^\d+\./.test(line.trim())) : [];
+    // Parse plan steps from content - handle multiple formats
+    let planSteps: string[] = [];
+    
+    if (phase === 'planning') {
+      // Try to parse as JSON array first (e.g., ["Step 1: ...", "Step 2: ..."])
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed)) {
+            planSteps = parsed.map((step: string) => 
+              typeof step === 'string' ? step : JSON.stringify(step)
+            );
+          }
+        } catch (e) {
+          // Not valid JSON, continue to line-by-line parsing
+        }
+      }
+      
+      // If no JSON array found, try line-by-line parsing
+      if (planSteps.length === 0) {
+        // Match lines starting with number, bullet, dash, or "Step"
+        planSteps = content.split('\n').filter(line => {
+          const trimmed = line.trim();
+          return /^(\d+[\.\):]|\-|\*|•|Step\s*\d+)/i.test(trimmed) && trimmed.length > 5;
+        });
+      }
+      
+      // Also check for markdown bold headers like "**Plan Created:**"
+      if (planSteps.length === 0 && content.includes('**')) {
+        // Extract content after headers
+        const lines = content.split('\n').filter(line => 
+          line.trim().length > 0 && !line.includes('**')
+        );
+        planSteps = lines;
+      }
+    }
 
+    // Use Plan component for planning phase with steps
+    if (phase === 'planning' && planSteps.length > 0) {
+      return (
+        <div key={key} className="w-full mb-2">
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-2 text-xs font-semibold border-l-4 rounded-r-md mb-2",
+            config.borderColor,
+            config.bgColor,
+            config.textColor
+          )}>
+            <Icon className="w-3.5 h-3.5" />
+            {config.label}
+          </div>
+          <Plan defaultOpen={true} isStreaming={isLoading && isLastMessage}>
+            <PlanHeader title="Execution Plan" />
+            <PlanContent>
+              {planSteps.map((step, i) => (
+                <PlanStep 
+                  key={i} 
+                  number={i + 1}
+                  status={i === 0 && isLoading ? 'active' : 'pending'}
+                >
+                  {/* Clean up step text - remove numbering prefixes */}
+                  {step.replace(/^(\d+[\.\):\s]*|Step\s*\d+[:\.\)]*\s*|\-\s*|\*\s*|•\s*)/i, '').trim()}
+                </PlanStep>
+              ))}
+            </PlanContent>
+          </Plan>
+        </div>
+      );
+    }
+
+    // Use Reasoning component for reflection phase
+    if (phase === 'reflection') {
+      return (
+        <div key={key} className="w-full mb-2">
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-2 text-xs font-semibold border-l-4 rounded-r-md mb-2",
+            config.borderColor,
+            config.bgColor,
+            config.textColor
+          )}>
+            <Icon className="w-3.5 h-3.5" />
+            {config.label}
+          </div>
+          <Reasoning defaultOpen={true} isStreaming={isLoading && isLastMessage}>
+            <ReasoningTrigger label="Agent Reflection" />
+            <ReasoningContent>{content}</ReasoningContent>
+          </Reasoning>
+        </div>
+      );
+    }
+
+    // Default phase block for other phases
     return (
       <div 
         key={key} 
@@ -370,37 +460,24 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
         )}
       >
         <div className={cn(
-          "px-3 py-1.5 font-semibold flex items-center gap-2 border-b",
+          "px-3 py-2 font-semibold flex items-center gap-2 border-b",
           `${config.bgColor.replace('/5', '/10')}`,
           config.textColor
         )}>
           <Icon className="w-3.5 h-3.5" />
           {config.label}
+          {isLoading && isLastMessage && (
+            <Loader2 className="w-3 h-3 animate-spin ml-auto" />
+          )}
         </div>
-        
-        {planSteps.length > 0 ? (
-          <div className="p-3">
-            <Task defaultOpen={true}>
-              <TaskTrigger title="Execution Plan" status="in_progress" />
-              <TaskContent>
-                {planSteps.map((step, i) => (
-                  <TaskItem key={i} status="pending">
-                    {step.replace(/^\d+\.\s*/, '')}
-                  </TaskItem>
-                ))}
-              </TaskContent>
-            </Task>
-          </div>
-        ) : (
-          <div className="p-3 whitespace-pre-wrap text-muted-foreground/90 leading-relaxed font-mono">
-            {content}
-          </div>
-        )}
+        <div className="p-3 whitespace-pre-wrap text-muted-foreground/90 leading-relaxed text-sm">
+          {content}
+        </div>
       </div>
     );
   };
 
-  // Render tool invocation
+  // Render tool invocation using enhanced Tool component
   const renderToolInvocation = (part: any, messageId: string, index: number) => {
     const toolName = part.toolName || 'tool';
     const args = part.args || part.input;
@@ -411,85 +488,78 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
     // Show approval UI only when: not auto-approve AND tool is in "call" state without result
     const isPending = !autoApprove && isCall && !result && !isLoading;
 
+    // Determine tool state for new component
+    const toolState = result && result !== 'Approved' && result !== 'Cancelled by user' 
+      ? 'complete' 
+      : (isLoading && isCall && !result) 
+        ? 'running' 
+        : 'pending';
+
     // Determine approval state for Confirmation component
     const approvalState = result === 'Approved' ? 'approved' : 
                           result === 'Cancelled by user' ? 'rejected' : 
                           isPending ? 'pending' : undefined;
 
     return (
-      <div
+      <Tool
         key={part.toolCallId || `${messageId}-tool-${index}`}
-        className="w-full border rounded-lg overflow-hidden bg-muted/5 text-sm mt-2 shadow-sm"
+        state={toolState}
+        defaultOpen={toolState === 'running' || isPending}
+        className="mt-2"
       >
-        {/* Tool Header */}
-        <div className="flex items-center gap-2 px-3 py-2 bg-muted/10 border-b">
-          <Terminal className="w-4 h-4 text-primary/60" />
-          <span className="font-semibold text-xs tracking-tight">
-            {toolName.toUpperCase()}
-          </span>
-          {autoApprove && (
-            <span className="ml-1 text-[10px] text-success bg-success/10 px-1.5 py-0.5 rounded-full font-medium">
-              AUTO
-            </span>
+        <ToolHeader 
+          toolName={toolName}
+          state={toolState}
+          isAuto={autoApprove}
+        />
+        <ToolContent>
+          <ToolInput input={args} label="Input" />
+          
+          {/* Approval UI - only when autoApprove is OFF */}
+          {isPending && (
+            <Confirmation approval={{ id: part.toolCallId, state: 'pending' }} state="pending">
+              <ConfirmationRequest>
+                The agent wants to execute this {toolName}. Do you approve?
+              </ConfirmationRequest>
+              <ConfirmationActions>
+                <ConfirmationAction 
+                  variant="outline"
+                  onClick={() => handleToolApproval(part.toolCallId, false)}
+                >
+                  <X className="w-3 h-3 mr-1" />
+                  Reject
+                </ConfirmationAction>
+                <ConfirmationAction 
+                  variant="default"
+                  onClick={() => handleToolApproval(part.toolCallId, true)}
+                >
+                  <Check className="w-3 h-3 mr-1" />
+                  Approve & Run
+                </ConfirmationAction>
+              </ConfirmationActions>
+            </Confirmation>
           )}
-          {isLoading && isCall && !result && (
-            <Loader2 className="w-3 h-3 animate-spin ml-auto text-muted-foreground" />
+
+          {/* Approved/Rejected status */}
+          {approvalState === 'approved' && (
+            <Confirmation state="approved">
+              <ConfirmationAccepted>Tool execution approved</ConfirmationAccepted>
+            </Confirmation>
           )}
-          {result && result !== 'Approved' && result !== 'Cancelled by user' && (
-            <Check className="w-3 h-3 text-success ml-auto" />
+          {approvalState === 'rejected' && (
+            <Confirmation state="rejected">
+              <ConfirmationRejected>Tool execution rejected by user</ConfirmationRejected>
+            </Confirmation>
           )}
-        </div>
 
-        {/* Command / Input */}
-        <div className="px-3 py-2 font-mono text-[11px] bg-black/5 dark:bg-white/5 border-b border-dashed border-muted/20">
-          <span className="text-primary/40 select-none">$ </span>
-          <span>{typeof args === 'string' ? args : JSON.stringify(args)}</span>
-        </div>
-
-        {/* Approval UI using Confirmation component - only when autoApprove is OFF */}
-        {isPending && (
-          <Confirmation approval={{ id: part.toolCallId, state: 'pending' }} state="pending">
-            <ConfirmationRequest>
-              The agent wants to execute this {toolName}. Do you approve?
-            </ConfirmationRequest>
-            <ConfirmationActions>
-              <ConfirmationAction 
-                variant="outline"
-                onClick={() => handleToolApproval(part.toolCallId, false)}
-              >
-                <X className="w-3 h-3 mr-1" />
-                Reject
-              </ConfirmationAction>
-              <ConfirmationAction 
-                variant="default"
-                onClick={() => handleToolApproval(part.toolCallId, true)}
-              >
-                <Check className="w-3 h-3 mr-1" />
-                Approve & Run
-              </ConfirmationAction>
-            </ConfirmationActions>
-          </Confirmation>
-        )}
-
-        {/* Approved/Rejected status */}
-        {approvalState === 'approved' && (
-          <Confirmation state="approved">
-            <ConfirmationAccepted>Tool execution approved</ConfirmationAccepted>
-          </Confirmation>
-        )}
-        {approvalState === 'rejected' && (
-          <Confirmation state="rejected">
-            <ConfirmationRejected>Tool execution rejected by user</ConfirmationRejected>
-          </Confirmation>
-        )}
-
-        {/* Result */}
-        {result && result !== 'Approved' && result !== 'Cancelled by user' && (
-          <div className="px-3 py-2 border-t font-mono text-[11px] whitespace-pre-wrap break-all max-h-60 overflow-y-auto bg-muted/5">
-            {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
-          </div>
-        )}
-      </div>
+          {/* Output with loading state */}
+          <ToolOutput 
+            output={result !== 'Approved' && result !== 'Cancelled by user' ? result : undefined}
+            isLoading={isLoading && isCall && !result}
+            label="Output"
+          />
+        </ToolContent>
+      </Tool>
     );
   };
 
