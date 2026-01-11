@@ -33,7 +33,7 @@ export const executeCommandTool = tool(
     },
     {
         name: 'execute_command',
-        description: 'Execute a shell command on the system. Use this to check system status, list files, inspect processes, or run AWS CLI commands. Always sanitize and validate commands for security.',
+        description: 'Execute a shell command on the system. Use this to check system status, list files, inspect processes, or run AWS CLI commands. When running AWS commands, include --profile <profileName> using the profile returned from get_aws_credentials.',
         schema: z.object({
             command: z.string().describe('The shell command to execute'),
         }),

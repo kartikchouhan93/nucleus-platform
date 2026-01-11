@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import { getDynamoDBDocumentClient, APP_TABLE_NAME, DEFAULT_TENANT_ID } from '../aws-config';
+import { createSessionProfile } from './session-manager';
 
 /**
  * AWS Credentials Tool
@@ -60,7 +61,7 @@ async function assumeRoleForAccount(
         RoleArn: roleArn,
         RoleSessionName: sessionName,
         ExternalId: externalId,
-        DurationSeconds: 3600, // 1 hour
+        DurationSeconds: 900, // 15 minutes
     });
 
     const response = await stsClient.send(assumeRoleCommand);
@@ -78,8 +79,9 @@ async function assumeRoleForAccount(
 /**
  * Get AWS Credentials Tool
  * 
- * Fetches temporary AWS credentials for the specified account.
- * Returns credentials that can be used with AWS CLI or SDK.
+ * Fetches temporary AWS credentials for the specified account
+ * and creates a temporary AWS profile for the session.
+ * Returns the profile name which can be used with --profile flag.
  */
 export const getAwsCredentialsTool = tool(
     async ({ accountId }: { accountId: string }): Promise<string> => {
@@ -126,29 +128,29 @@ export const getAwsCredentialsTool = tool(
             // 3. Determine region (use first region from account, or default)
             const region = account.regions?.[0] || process.env.AWS_REGION || process.env.NEXT_PUBLIC_AWS_REGION || 'us-east-1';
 
-            // 4. Return credentials as JSON string
-            const result: AWSCredentials = {
-                accessKeyId: credentials.AccessKeyId!,
-                secretAccessKey: credentials.SecretAccessKey!,
-                sessionToken: credentials.SessionToken!,
-                region: region,
-                accountId: accountId,
-                accountName: account.accountName || account.name || accountId,
-                expiresAt: expiration.toISOString()
-            };
+            // 4. Create session profile
+            const profile = await createSessionProfile(
+                accountId,
+                {
+                    accessKeyId: credentials.AccessKeyId!,
+                    secretAccessKey: credentials.SecretAccessKey!,
+                    sessionToken: credentials.SessionToken!,
+                    region: region
+                }
+            );
 
-            console.log(`[Tool] Successfully obtained credentials for account: ${accountId}`);
-            console.log(`[Tool] Credentials expire at: ${result.expiresAt}`);
+            console.log(`[Tool] Created profile: ${profile.profileName} for account: ${accountId}`);
+            console.log(`[Tool] Profile expires at: ${profile.expiresAt.toISOString()}`);
 
             return JSON.stringify({
                 success: true,
-                credentials: result,
-                message: `Successfully obtained temporary AWS credentials for account "${result.accountName}" (${accountId}). These credentials are valid until ${result.expiresAt}.`,
-                usage: `To use these credentials with AWS CLI, set the following environment variables before running commands:
-export AWS_ACCESS_KEY_ID="${result.accessKeyId}"
-export AWS_SECRET_ACCESS_KEY="${result.secretAccessKey}"
-export AWS_SESSION_TOKEN="${result.sessionToken}"
-export AWS_REGION="${result.region}"`
+                profileName: profile.profileName,
+                region: region,
+                accountId: accountId,
+                accountName: account.accountName || account.name || accountId,
+                expiresAt: profile.expiresAt.toISOString(),
+                message: `Created AWS profile "${profile.profileName}" for account "${account.accountName || accountId}". Profile valid until ${profile.expiresAt.toISOString()}.`,
+                usage: `AWS CLI commands will automatically use this profile. For manual use: --profile ${profile.profileName} OR AWS_PROFILE=${profile.profileName}`
             });
 
         } catch (error: any) {
@@ -171,11 +173,11 @@ export AWS_REGION="${result.region}"`
     },
     {
         name: 'get_aws_credentials',
-        description: `Fetch temporary AWS credentials for a specific AWS account. 
+        description: `Fetch temporary AWS credentials for a specific AWS account and create a session profile.
 This tool retrieves the IAM role from the account configuration in DynamoDB and uses STS AssumeRole to obtain temporary credentials.
-Returns access key, secret key, session token, and region that can be used with AWS CLI or SDK.
+A temporary AWS profile is created that can be used with AWS CLI commands using the --profile flag.
 IMPORTANT: You MUST call this tool before executing any AWS CLI commands if an account is selected.
-The returned credentials should be exported as environment variables before running AWS commands.`,
+The returned profile name should be used with all subsequent AWS CLI commands.`,
         schema: z.object({
             accountId: z.string().describe('The AWS account ID (12-digit number) to get credentials for'),
         }),

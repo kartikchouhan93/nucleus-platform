@@ -202,7 +202,7 @@ export function getRecentMessages(messages: BaseMessage[], maxMessages: number =
 export interface GraphConfig {
     model: string;
     autoApprove: boolean;
-    accountId?: string; // Optional: AWS account ID for context
+    accountId?: string;   // Optional: AWS account ID for context
     accountName?: string; // Optional: AWS account name for display
 }
 

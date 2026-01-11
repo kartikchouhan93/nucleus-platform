@@ -40,7 +40,7 @@ export function createFastGraph(config: GraphConfig) {
 
     // Build account context string for prompts
     const accountContext = accountId
-        ? `\n\nIMPORTANT - AWS ACCOUNT CONTEXT:\nYou are operating in the context of AWS account: ${accountName || accountId} (ID: ${accountId}).\nBefore executing any AWS CLI commands, you MUST first call the get_aws_credentials tool with accountId="${accountId}" to obtain temporary credentials.\nThen export those credentials as environment variables before running AWS commands.\nNEVER use the host's default credentials - always use the credentials from get_aws_credentials.`
+        ? `\n\nIMPORTANT - AWS ACCOUNT CONTEXT:\nYou are operating in the context of AWS account: ${accountName || accountId} (ID: ${accountId}).\nBefore executing any AWS CLI commands, you MUST first call the get_aws_credentials tool with accountId="${accountId}" to create a session profile.\nThe tool will return a profile name. Use this profile with ALL subsequent AWS CLI commands by adding: --profile <profileName>\nExample: aws sts get-caller-identity --profile <profileName>\nNEVER use the host's default credentials - always use the profile returned from get_aws_credentials.`
         : `\n\nNOTE: No AWS account is selected. If the user asks to perform AWS operations, inform them that they need to select an AWS account first.`;
 
     // --- GENERATOR NODE (Agent) ---
