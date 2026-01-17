@@ -405,6 +405,12 @@ export class ComputeStack extends cdk.Stack {
             resources: ['*'],
         }));
 
+        // AWS Marketplace permissions (for marketplace Bedrock models)
+        ecsTaskRole.addToPolicy(new iam.PolicyStatement({
+            actions: ['aws-marketplace:ViewSubscriptions', 'aws-marketplace:Subscribe'],
+            resources: ['*'],
+        }));
+
         // EventBridge permissions
         ecsTaskRole.addToPolicy(new iam.PolicyStatement({
             actions: ['events:DescribeRule', 'events:PutRule', 'events:ListRules'],

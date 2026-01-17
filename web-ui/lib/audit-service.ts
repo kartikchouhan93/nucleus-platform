@@ -182,6 +182,11 @@ export class AuditService {
             const response = await getDynamoDBDocumentClient().send(command);
             let auditLogs = (response.Items || []).map(this.transformToAuditLog);
 
+            // Filter out scheduler individual resource events (ec2/ecs/rds start/stop/error)
+            // These are already captured in the scheduler.complete event metadata
+            const schedulerResourceEventPattern = /^scheduler\.(ec2|ecs|rds)\.(start|stop|error)$/;
+            auditLogs = auditLogs.filter(l => !schedulerResourceEventPattern.test(l.eventType || ''));
+
             // In-memory filtering for attributes NOT covered by Index keys (Severity, Status, ResourceType etc.)
             // Note: Efficient pagination requires these to be FilterExpressions in the Query, but for complex combinations
             // we often mix Query + Filter.

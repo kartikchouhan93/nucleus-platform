@@ -89,6 +89,7 @@ export function EditScheduleDialog({
     active: true,
     resourceTags: "",
     excludeTags: "",
+    resources: [] as Array<{ id: string; type: string; name?: string; arn?: string }>,
   });
 
   const [isUpdating, setIsUpdating] = useState(false);
@@ -109,6 +110,7 @@ export function EditScheduleDialog({
         active: schedule.active ?? true,
         resourceTags: schedule.resourceTags || "",
         excludeTags: schedule.excludeTags || "",
+        resources: schedule.resources || [],
       });
     }
   }, [schedule]);
@@ -134,6 +136,7 @@ export function EditScheduleDialog({
         timezone: formData.timezone,
         days: formData.daysOfWeek,
         active: formData.active,
+        resources: formData.resources,
         updatedBy: session?.user?.email || "user", // Get from auth context
       });
 
