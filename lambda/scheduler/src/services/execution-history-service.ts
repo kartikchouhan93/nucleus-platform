@@ -344,3 +344,45 @@ export async function getLastRDSInstanceState(
     }
 }
 
+/**
+ * Get the last saved ASG state from previous execution history
+ * Used to restore ASG to its previous minSize, maxSize, desiredCapacity when starting
+ * 
+ * @param scheduleId - The schedule ID to search history for
+ * @param asgArn - The Auto Scaling Group ARN to find state for
+ * @param tenantId - Tenant ID (default: DEFAULT_TENANT_ID)
+ * @returns The last ASG capacity values, or null if not found
+ */
+export async function getLastASGState(
+    scheduleId: string,
+    asgArn: string,
+    tenantId = DEFAULT_TENANT_ID
+): Promise<{ minSize: number; maxSize: number; desiredCapacity: number } | null> {
+    try {
+        // Get recent execution history for this schedule
+        const executions = await getExecutionHistory(scheduleId, tenantId, 10);
+
+        // Look through executions to find the last time this ASG was stopped
+        for (const execution of executions) {
+            if (execution.schedule_metadata?.asg) {
+                const asgResource = execution.schedule_metadata.asg.find(
+                    (a) => a.arn === asgArn && a.action === 'stop' && a.status === 'success'
+                );
+                if (asgResource && asgResource.last_state.desiredCapacity > 0) {
+                    logger.debug(`Found last ASG state for ${asgArn}: minSize=${asgResource.last_state.minSize}, maxSize=${asgResource.last_state.maxSize}, desiredCapacity=${asgResource.last_state.desiredCapacity}`);
+                    return {
+                        minSize: asgResource.last_state.minSize,
+                        maxSize: asgResource.last_state.maxSize,
+                        desiredCapacity: asgResource.last_state.desiredCapacity,
+                    };
+                }
+            }
+        }
+
+        logger.debug(`No previous ASG state found for ${asgArn}`);
+        return null;
+    } catch (error) {
+        logger.error(`Failed to get last ASG state for ${asgArn}`, error);
+        return null;
+    }
+}

@@ -7,6 +7,7 @@ import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
 import { ECSClient, ListClustersCommand, ListServicesCommand, DescribeServicesCommand } from '@aws-sdk/client-ecs';
 import { RDSClient, DescribeDBInstancesCommand } from '@aws-sdk/client-rds';
 import { EC2Client, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
+import { AutoScalingClient, DescribeAutoScalingGroupsCommand } from '@aws-sdk/client-auto-scaling';
 
 // Define handleDynamoDBError if it's not properly imported
 const handleError = (error: any, operation: string) => {
@@ -546,9 +547,9 @@ export class AccountService {
     }
 
     /**
-     * Scan resources (EC2, ECS, RDS) for a given account
+     * Scan resources (EC2, ECS, RDS, ASG) for a given account
      */
-    static async scanResources(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string; clusterArn?: string }>> {
+    static async scanResources(accountId: string, tenantId: string = DEFAULT_TENANT_ID): Promise<Array<{ id: string; type: 'ec2' | 'ecs' | 'rds' | 'asg'; name: string; arn: string; clusterArn?: string }>> {
         try {
             console.log(`AccountService - Scanning resources for account: ${accountId}`);
 
@@ -578,7 +579,7 @@ export class AccountService {
                 sessionToken: stsResponse.Credentials.SessionToken!,
             };
 
-            const resources: Array<{ id: string; type: 'ec2' | 'ecs' | 'rds'; name: string; arn: string; clusterArn?: string }> = [];
+            const resources: Array<{ id: string; type: 'ec2' | 'ecs' | 'rds' | 'asg'; name: string; arn: string; clusterArn?: string }> = [];
 
             // 2. Scan EC2
             try {
@@ -663,6 +664,24 @@ export class AccountService {
                 });
             } catch (e) {
                 console.error('Error scanning RDS:', e);
+            }
+
+            // 5. Scan ASG
+            try {
+                const asgClient = new AutoScalingClient({ region, credentials });
+                const asgResponse = await asgClient.send(new DescribeAutoScalingGroupsCommand({}));
+                asgResponse.AutoScalingGroups?.forEach(asg => {
+                    if (asg.AutoScalingGroupName) {
+                        resources.push({
+                            id: asg.AutoScalingGroupName,
+                            type: 'asg',
+                            name: asg.AutoScalingGroupName,
+                            arn: asg.AutoScalingGroupARN || `arn:aws:autoscaling:${region}:${accountId}:autoScalingGroup:uuid:autoScalingGroupName/${asg.AutoScalingGroupName}`
+                        });
+                    }
+                });
+            } catch (e) {
+                console.error('Error scanning ASG:', e);
             }
 
             // Update resource count in metadata

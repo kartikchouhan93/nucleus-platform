@@ -780,12 +780,19 @@ async function createExecutionAuditLog(executionId, schedule, metadata, summary,
     failed: metadata.rds.filter((r) => r.status === "failed").length,
     skipped: metadata.rds.filter((r) => r.action === "skip").length
   };
+  const asgSummary = {
+    started: metadata.asg.filter((r) => r.action === "start" && r.status === "success").length,
+    stopped: metadata.asg.filter((r) => r.action === "stop" && r.status === "success").length,
+    failed: metadata.asg.filter((r) => r.status === "failed").length,
+    skipped: metadata.asg.filter((r) => r.action === "skip").length
+  };
   const overallStatus = summary.resourcesFailed > 0 ? summary.resourcesStarted + summary.resourcesStopped > 0 ? "warning" : "error" : "success";
   const details = [
     `Execution ${executionId} for schedule "${schedule.name}" completed.`,
     `EC2: ${ec2Summary.started} started, ${ec2Summary.stopped} stopped, ${ec2Summary.failed} failed, ${ec2Summary.skipped} skipped.`,
     `ECS: ${ecsSummary.started} started, ${ecsSummary.stopped} stopped, ${ecsSummary.failed} failed, ${ecsSummary.skipped} skipped.`,
     `RDS: ${rdsSummary.started} started, ${rdsSummary.stopped} stopped, ${rdsSummary.failed} failed, ${rdsSummary.skipped} skipped.`,
+    `ASG: ${asgSummary.started} started, ${asgSummary.stopped} stopped, ${asgSummary.failed} failed, ${asgSummary.skipped} skipped.`,
     `Duration: ${summary.duration}ms`
   ].join(" ");
   await createAuditLog({
@@ -812,7 +819,8 @@ async function createExecutionAuditLog(executionId, schedule, metadata, summary,
         },
         ec2: ec2Summary,
         ecs: ecsSummary,
-        rds: rdsSummary
+        rds: rdsSummary,
+        asg: asgSummary
       },
       schedule_metadata: metadata
     }
@@ -1020,6 +1028,31 @@ async function getLastRDSInstanceState(scheduleId, instanceArn, tenantId = DEFAU
     return null;
   } catch (error) {
     logger.error(`Failed to get last RDS instance state for ${instanceArn}`, error);
+    return null;
+  }
+}
+async function getLastASGState(scheduleId, asgArn, tenantId = DEFAULT_TENANT_ID) {
+  try {
+    const executions = await getExecutionHistory(scheduleId, tenantId, 10);
+    for (const execution of executions) {
+      if (execution.schedule_metadata?.asg) {
+        const asgResource = execution.schedule_metadata.asg.find(
+          (a) => a.arn === asgArn && a.action === "stop" && a.status === "success"
+        );
+        if (asgResource && asgResource.last_state.desiredCapacity > 0) {
+          logger.debug(`Found last ASG state for ${asgArn}: minSize=${asgResource.last_state.minSize}, maxSize=${asgResource.last_state.maxSize}, desiredCapacity=${asgResource.last_state.desiredCapacity}`);
+          return {
+            minSize: asgResource.last_state.minSize,
+            maxSize: asgResource.last_state.maxSize,
+            desiredCapacity: asgResource.last_state.desiredCapacity
+          };
+        }
+      }
+    }
+    logger.debug(`No previous ASG state found for ${asgArn}`);
+    return null;
+  } catch (error) {
+    logger.error(`Failed to get last ASG state for ${asgArn}`, error);
     return null;
   }
 }
@@ -1526,6 +1559,156 @@ function extractClusterName(arn) {
   return match[1];
 }
 
+// src/resource-schedulers/asg-scheduler.ts
+import {
+  AutoScalingClient,
+  DescribeAutoScalingGroupsCommand,
+  UpdateAutoScalingGroupCommand
+} from "@aws-sdk/client-auto-scaling";
+async function processASGResource(resource, schedule, action, credentials, metadata, lastState) {
+  const asgClient = new AutoScalingClient({
+    credentials: credentials.credentials,
+    region: credentials.region
+  });
+  const log = logger.child({
+    executionId: metadata.executionId,
+    accountId: metadata.account.accountId,
+    region: metadata.region,
+    service: "asg",
+    resourceId: resource.id
+  });
+  const asgName = resource.id;
+  log.info(`Processing ASG resource: ${asgName} (${resource.name || "unnamed"})`);
+  try {
+    const describeResponse = await asgClient.send(new DescribeAutoScalingGroupsCommand({
+      AutoScalingGroupNames: [asgName]
+    }));
+    const asg = describeResponse.AutoScalingGroups?.[0];
+    if (!asg) {
+      throw new Error(`Auto Scaling Group ${asgName} not found`);
+    }
+    const currentMinSize = asg.MinSize ?? 0;
+    const currentMaxSize = asg.MaxSize ?? 0;
+    const currentDesiredCapacity = asg.DesiredCapacity ?? 0;
+    const instanceCount = asg.Instances?.length ?? 0;
+    log.debug(`ASG ${asgName}: minSize=${currentMinSize}, maxSize=${currentMaxSize}, desiredCapacity=${currentDesiredCapacity}, instances=${instanceCount}, action=${action}`);
+    if (action === "stop" && (currentDesiredCapacity > 0 || currentMinSize > 0)) {
+      await asgClient.send(new UpdateAutoScalingGroupCommand({
+        AutoScalingGroupName: asgName,
+        MinSize: 0,
+        MaxSize: 0,
+        DesiredCapacity: 0
+      }));
+      log.info(`Stopped ASG ${asgName} (was minSize=${currentMinSize}, maxSize=${currentMaxSize}, desiredCapacity=${currentDesiredCapacity})`);
+      await createAuditLog({
+        type: "audit_log",
+        eventType: "scheduler.asg.stop",
+        action: "stop",
+        user: "system",
+        userType: "system",
+        resourceType: "asg",
+        resourceId: asgName,
+        status: "success",
+        details: `Stopped ASG ${asgName} for schedule ${schedule.name}. Previous state: minSize=${currentMinSize}, maxSize=${currentMaxSize}, desiredCapacity=${currentDesiredCapacity}`,
+        severity: "medium",
+        accountId: metadata.account.accountId,
+        region: metadata.region
+      });
+      return {
+        arn: resource.arn,
+        resourceId: resource.id,
+        action: "stop",
+        status: "success",
+        last_state: {
+          minSize: currentMinSize,
+          // Save for restoration!
+          maxSize: currentMaxSize,
+          desiredCapacity: currentDesiredCapacity
+        }
+      };
+    } else if (action === "start" && currentDesiredCapacity === 0 && currentMinSize === 0) {
+      const targetMinSize = lastState?.minSize ?? 1;
+      const targetMaxSize = lastState?.maxSize ?? 1;
+      const targetDesiredCapacity = lastState?.desiredCapacity ?? 1;
+      await asgClient.send(new UpdateAutoScalingGroupCommand({
+        AutoScalingGroupName: asgName,
+        MinSize: targetMinSize,
+        MaxSize: targetMaxSize,
+        DesiredCapacity: targetDesiredCapacity
+      }));
+      log.info(`Started ASG ${asgName} with minSize=${targetMinSize}, maxSize=${targetMaxSize}, desiredCapacity=${targetDesiredCapacity}`);
+      await createAuditLog({
+        type: "audit_log",
+        eventType: "scheduler.asg.start",
+        action: "start",
+        user: "system",
+        userType: "system",
+        resourceType: "asg",
+        resourceId: asgName,
+        status: "success",
+        details: `Started ASG ${asgName} for schedule ${schedule.name}. Restored state: minSize=${targetMinSize}, maxSize=${targetMaxSize}, desiredCapacity=${targetDesiredCapacity}`,
+        severity: "medium",
+        accountId: metadata.account.accountId,
+        region: metadata.region
+      });
+      return {
+        arn: resource.arn,
+        resourceId: resource.id,
+        action: "start",
+        status: "success",
+        last_state: {
+          minSize: currentMinSize,
+          // Was 0 before start
+          maxSize: currentMaxSize,
+          desiredCapacity: currentDesiredCapacity
+        }
+      };
+    } else {
+      log.debug(`ASG ${asgName} already in desired state, skipping`);
+      return {
+        arn: resource.arn,
+        resourceId: resource.id,
+        action: "skip",
+        status: "success",
+        last_state: {
+          minSize: currentMinSize,
+          maxSize: currentMaxSize,
+          desiredCapacity: currentDesiredCapacity
+        }
+      };
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    log.error(`Failed to process ASG ${asgName}`, error);
+    await createAuditLog({
+      type: "audit_log",
+      eventType: "scheduler.asg.error",
+      action,
+      user: "system",
+      userType: "system",
+      resourceType: "asg",
+      resourceId: asgName,
+      status: "error",
+      details: `Failed to ${action} ASG ${asgName}: ${errorMessage}`,
+      severity: "high",
+      accountId: metadata.account.accountId,
+      region: metadata.region
+    });
+    return {
+      arn: resource.arn,
+      resourceId: resource.id,
+      action,
+      status: "failed",
+      error: errorMessage,
+      last_state: {
+        minSize: 0,
+        maxSize: 0,
+        desiredCapacity: 0
+      }
+    };
+  }
+}
+
 // src/services/scheduler-service.ts
 async function runFullScan(triggeredBy = "system") {
   const executionId = v4_default();
@@ -1643,7 +1826,6 @@ async function runPartialScan(event, triggeredBy = "web-ui") {
       userType: userEmail ? "user" : "system",
       resourceType: "scheduler",
       resourceId: executionId,
-      resource: schedule.name,
       status: overallStatus,
       details: `Partial scan completed for "${schedule.name}": ${result.started} started, ${result.stopped} stopped, ${result.failed} failed`,
       severity: result.failed > 0 ? "medium" : "info",
@@ -1675,7 +1857,6 @@ async function runPartialScan(event, triggeredBy = "web-ui") {
       userType: userEmail ? "user" : "system",
       resourceType: "scheduler",
       resourceId: executionId,
-      resource: schedule.name,
       status: "error",
       details: `Partial scan failed for "${schedule.name}": ${error instanceof Error ? error.message : String(error)}`,
       severity: "high",
@@ -1718,7 +1899,8 @@ async function processSchedule(schedule, accounts, triggeredBy, userEmail) {
   const scheduleMetadata = {
     ec2: [],
     ecs: [],
-    rds: []
+    rds: [],
+    asg: []
   };
   let started = 0;
   let stopped = 0;
@@ -1791,6 +1973,22 @@ async function processSchedule(schedule, accounts, triggeredBy, userEmail) {
               const result = await processECSResource(resource, schedule, action, credentials, metadata, lastDesiredCount);
               scheduleMetadata.ecs.push(result);
               updateCounts(result, action, { started: () => started++, stopped: () => stopped++, failed: () => failed++ });
+            } else if (resource.type === "asg") {
+              let lastState;
+              if (action === "start") {
+                const savedState = await getLastASGState(
+                  schedule.scheduleId,
+                  resource.arn,
+                  schedule.tenantId
+                );
+                lastState = savedState || void 0;
+                if (lastState) {
+                  logger.debug(`ASG ${resource.id}: Found last state - desiredCapacity=${lastState.desiredCapacity}`);
+                }
+              }
+              const result = await processASGResource(resource, schedule, action, credentials, metadata, lastState);
+              scheduleMetadata.asg.push(result);
+              updateCounts(result, action, { started: () => started++, stopped: () => stopped++, failed: () => failed++ });
             }
           } catch (error) {
             logger.error(`Error processing resource ${resource.arn}`, error);
@@ -1844,7 +2042,7 @@ function groupResourcesByAccount(resources, _accounts) {
 function groupResourcesByRegion(resources) {
   const map = /* @__PURE__ */ new Map();
   for (const resource of resources) {
-    const region = extractRegionFromArn4(resource.arn);
+    const region = extractRegionFromArn5(resource.arn);
     if (!region) {
       logger.warn(`Could not extract region from ARN: ${resource.arn}`);
       continue;
@@ -1863,7 +2061,7 @@ function extractAccountIdFromArn(arn) {
   }
   return parts[4];
 }
-function extractRegionFromArn4(arn) {
+function extractRegionFromArn5(arn) {
   const parts = arn.split(":");
   if (parts.length < 4) {
     return null;

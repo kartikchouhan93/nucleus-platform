@@ -256,6 +256,13 @@ export async function createExecutionAuditLog(
         skipped: metadata.rds.filter(r => r.action === 'skip').length,
     };
 
+    const asgSummary = {
+        started: metadata.asg.filter(r => r.action === 'start' && r.status === 'success').length,
+        stopped: metadata.asg.filter(r => r.action === 'stop' && r.status === 'success').length,
+        failed: metadata.asg.filter(r => r.status === 'failed').length,
+        skipped: metadata.asg.filter(r => r.action === 'skip').length,
+    };
+
     const overallStatus = summary.resourcesFailed > 0
         ? (summary.resourcesStarted + summary.resourcesStopped > 0 ? 'warning' : 'error')
         : 'success';
@@ -265,6 +272,7 @@ export async function createExecutionAuditLog(
         `EC2: ${ec2Summary.started} started, ${ec2Summary.stopped} stopped, ${ec2Summary.failed} failed, ${ec2Summary.skipped} skipped.`,
         `ECS: ${ecsSummary.started} started, ${ecsSummary.stopped} stopped, ${ecsSummary.failed} failed, ${ecsSummary.skipped} skipped.`,
         `RDS: ${rdsSummary.started} started, ${rdsSummary.stopped} stopped, ${rdsSummary.failed} failed, ${rdsSummary.skipped} skipped.`,
+        `ASG: ${asgSummary.started} started, ${asgSummary.stopped} stopped, ${asgSummary.failed} failed, ${asgSummary.skipped} skipped.`,
         `Duration: ${summary.duration}ms`,
     ].join(' ');
 
@@ -293,6 +301,7 @@ export async function createExecutionAuditLog(
                 ec2: ec2Summary,
                 ecs: ecsSummary,
                 rds: rdsSummary,
+                asg: asgSummary,
             },
             schedule_metadata: metadata,
         },

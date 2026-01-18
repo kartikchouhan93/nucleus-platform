@@ -59,7 +59,7 @@ const scheduleFormSchema = z.object({
   accountId: z.string().min(1, "Account is required"),
   resources: z.array(z.object({
     id: z.string(),
-    type: z.enum(['ec2', 'ecs', 'rds']),
+    type: z.enum(['ec2', 'ecs', 'rds', 'asg']),
     name: z.string(),
     arn: z.string().optional()
   })).optional(),
@@ -99,7 +99,8 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
     ec2: Array<{ id: string, name: string, type: 'ec2', arn: string }>;
     ecs: Array<{ id: string, name: string, type: 'ecs', arn: string }>;
     rds: Array<{ id: string, name: string, type: 'rds', arn: string }>;
-  }>({ ec2: [], ecs: [], rds: [] });
+    asg: Array<{ id: string, name: string, type: 'asg', arn: string }>;
+  }>({ ec2: [], ecs: [], rds: [], asg: [] });
   const [hasScanned, setHasScanned] = useState(false);
 
   const form = useForm<ScheduleFormValues>({
@@ -144,12 +145,12 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
   // Logic: if editing and matches initial, don't reset. If fresh create, reset.
   useEffect(() => {
       if (!isEditing && hasScanned) {
-          setScanResults({ ec2: [], ecs: [], rds: [] });
+          setScanResults({ ec2: [], ecs: [], rds: [], asg: [] });
           setHasScanned(false);
           form.setValue("resources", []);
       } else if (isEditing && selectedAccountId !== initialData?.accounts?.[0]) {
            // User changed account in edit mode
-           setScanResults({ ec2: [], ecs: [], rds: [] });
+           setScanResults({ ec2: [], ecs: [], rds: [], asg: [] });
            setHasScanned(false);
            form.setValue("resources", []);
       }
@@ -169,6 +170,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
         ec2: resources.filter(r => r.type === 'ec2') as any[],
         ecs: resources.filter(r => r.type === 'ecs') as any[],
         rds: resources.filter(r => r.type === 'rds') as any[],
+        asg: resources.filter(r => r.type === 'asg') as any[],
       };
       
       setScanResults(newResults);
@@ -214,7 +216,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
     }
   };
 
-  const toggleResource = (resource: { id: string, type: 'ec2' | 'ecs' | 'rds', name: string, arn: string }, checked: boolean) => {
+  const toggleResource = (resource: { id: string, type: 'ec2' | 'ecs' | 'rds' | 'asg', name: string, arn: string }, checked: boolean) => {
     const currentResources = form.getValues("resources") || [];
     if (checked) {
       // Avoid duplicates
@@ -226,7 +228,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
     }
   };
 
-  const toggleAll = (type: 'ec2' | 'ecs' | 'rds', checked: boolean) => {
+  const toggleAll = (type: 'ec2' | 'ecs' | 'rds' | 'asg', checked: boolean) => {
       const typeResources = scanResults[type];
       const currentResources = form.getValues("resources") || [];
       const otherResources = currentResources.filter(r => r.type !== type);
@@ -240,7 +242,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
       }
   };
   
-  const isAllSelected = (type: 'ec2' | 'ecs' | 'rds') => {
+  const isAllSelected = (type: 'ec2' | 'ecs' | 'rds' | 'asg') => {
       const typeResources = scanResults[type];
       if (typeResources.length === 0) return false;
       return typeResources.every(r => selectedResources.some(sr => sr.id === r.id));
@@ -328,13 +330,14 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
 
                 {hasScanned && (
                   <Tabs defaultValue="ec2" className="w-full">
-                    <TabsList className="grid w-full grid-cols-3">
+                    <TabsList className="grid w-full grid-cols-4">
                       <TabsTrigger value="ec2">EC2 ({scanResults.ec2.length})</TabsTrigger>
                       <TabsTrigger value="ecs">ECS ({scanResults.ecs.length})</TabsTrigger>
                       <TabsTrigger value="rds">RDS ({scanResults.rds.length})</TabsTrigger>
+                      <TabsTrigger value="asg">ASG ({scanResults.asg.length})</TabsTrigger>
                     </TabsList>
                     
-                    {['ec2', 'ecs', 'rds'].map((type) => (
+                    {['ec2', 'ecs', 'rds', 'asg'].map((type) => (
                         <TabsContent key={type} value={type}>
                              <div className="flex items-center space-x-2 pb-2 pl-4">
                                  <Checkbox 

@@ -16,6 +16,7 @@ import {
     getLastECSServiceState,
     getLastEC2InstanceState,
     getLastRDSInstanceState,
+    getLastASGState,
     type CreateExecutionParams,
 } from './execution-history-service.js';
 import { assumeRole } from './sts-service.js';
@@ -23,6 +24,8 @@ import {
     processEC2Resource,
     processRDSResource,
     processECSResource,
+    processASGResource,
+
 } from '../resource-schedulers/index.js';
 import { isCurrentTimeInRange } from '../utils/time-utils.js';
 import type {
@@ -35,6 +38,8 @@ import type {
     EC2ResourceExecution,
     ECSResourceExecution,
     RDSResourceExecution,
+    ASGResourceExecution,
+
 } from '../types/index.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -192,7 +197,6 @@ export async function runPartialScan(
             userType: userEmail ? 'user' : 'system',
             resourceType: 'scheduler',
             resourceId: executionId,
-            resource: schedule.name,
             status: overallStatus,
             details: `Partial scan completed for "${schedule.name}": ${result.started} started, ${result.stopped} stopped, ${result.failed} failed`,
             severity: result.failed > 0 ? 'medium' : 'info',
@@ -227,7 +231,6 @@ export async function runPartialScan(
             userType: userEmail ? 'user' : 'system',
             resourceType: 'scheduler',
             resourceId: executionId,
-            resource: schedule.name,
             status: 'error',
             details: `Partial scan failed for "${schedule.name}": ${error instanceof Error ? error.message : String(error)}`,
             severity: 'high',
@@ -298,6 +301,7 @@ async function processSchedule(
         ec2: [],
         ecs: [],
         rds: [],
+        asg: [],
     };
 
     let started = 0;
@@ -380,6 +384,23 @@ async function processSchedule(
                             }
                             const result = await processECSResource(resource, schedule, action, credentials, metadata, lastDesiredCount);
                             scheduleMetadata.ecs.push(result);
+                            updateCounts(result, action, { started: () => started++, stopped: () => stopped++, failed: () => failed++ });
+                        } else if (resource.type === 'asg') {
+                            // For ASG start, get last state from previous execution
+                            let lastState: { minSize: number; maxSize: number; desiredCapacity: number } | undefined;
+                            if (action === 'start') {
+                                const savedState = await getLastASGState(
+                                    schedule.scheduleId,
+                                    resource.arn,
+                                    schedule.tenantId
+                                );
+                                lastState = savedState || undefined;
+                                if (lastState) {
+                                    logger.debug(`ASG ${resource.id}: Found last state - desiredCapacity=${lastState.desiredCapacity}`);
+                                }
+                            }
+                            const result = await processASGResource(resource, schedule, action, credentials, metadata, lastState);
+                            scheduleMetadata.asg.push(result);
                             updateCounts(result, action, { started: () => started++, stopped: () => stopped++, failed: () => failed++ });
                         }
                     } catch (error) {
@@ -504,7 +525,7 @@ function extractRegionFromArn(arn: string): string | null {
  * Update counts based on resource execution result
  */
 function updateCounts(
-    result: EC2ResourceExecution | ECSResourceExecution | RDSResourceExecution,
+    result: EC2ResourceExecution | ECSResourceExecution | RDSResourceExecution | ASGResourceExecution,
     _action: 'start' | 'stop',
     counters: { started: () => void; stopped: () => void; failed: () => void }
 ): void {

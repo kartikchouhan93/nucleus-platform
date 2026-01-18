@@ -23,6 +23,7 @@ import {
   Info,
   ArrowLeft,
   Loader2,
+  Cpu,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/date-utils";
 
@@ -135,14 +136,15 @@ export default function ExecutionDetailsPage({ params }: ExecutionDetailsPagePro
   }
 
   // Filter resources to only show start/stop actions (exclude skip)
-  const metadata = execution.schedule_metadata || { ec2: [], rds: [], ecs: [] };
+  const metadata = execution.schedule_metadata || { ec2: [], rds: [], ecs: [], asg: [] };
   const filterActioned = (resources: any[]) => 
     (resources || []).filter((r: any) => r.action === 'start' || r.action === 'stop');
   
   const ec2Resources = filterActioned(metadata.ec2);
   const rdsResources = filterActioned(metadata.rds);
   const ecsResources = filterActioned(metadata.ecs);
-  const totalResources = ec2Resources.length + rdsResources.length + ecsResources.length;
+  const asgResources = filterActioned(metadata.asg);
+  const totalResources = ec2Resources.length + rdsResources.length + ecsResources.length + asgResources.length;
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -259,7 +261,7 @@ export default function ExecutionDetailsPage({ params }: ExecutionDetailsPagePro
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="all" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="all">All Resources</TabsTrigger>
                 <TabsTrigger value="ec2" disabled={ec2Resources.length === 0}>
                   EC2 ({ec2Resources.length})
@@ -269,6 +271,9 @@ export default function ExecutionDetailsPage({ params }: ExecutionDetailsPagePro
                 </TabsTrigger>
                 <TabsTrigger value="ecs" disabled={ecsResources.length === 0}>
                   ECS ({ecsResources.length})
+                </TabsTrigger>
+                <TabsTrigger value="asg" disabled={asgResources.length === 0}>
+                  ASG ({asgResources.length})
                 </TabsTrigger>
               </TabsList>
 
@@ -304,6 +309,14 @@ export default function ExecutionDetailsPage({ params }: ExecutionDetailsPagePro
                         type="ecs"
                       />
                     )}
+                    {asgResources.length > 0 && (
+                      <ResourceSection
+                        title="Auto Scaling Groups"
+                        icon={<Cpu className="h-4 w-4" />}
+                        resources={asgResources}
+                        type="asg"
+                      />
+                    )}
                   </div>
                 )}
               </TabsContent>
@@ -334,6 +347,15 @@ export default function ExecutionDetailsPage({ params }: ExecutionDetailsPagePro
                   type="ecs"
                 />
               </TabsContent>
+
+              <TabsContent value="asg" className="mt-4">
+                <ResourceSection
+                  title="Auto Scaling Groups"
+                  icon={<Cpu className="h-4 w-4" />}
+                  resources={asgResources}
+                  type="asg"
+                />
+              </TabsContent>
             </Tabs>
           </CardContent>
         </Card>
@@ -351,7 +373,7 @@ function ResourceSection({
   title: string;
   icon: React.ReactNode;
   resources: any[];
-  type: "ec2" | "rds" | "ecs";
+  type: "ec2" | "rds" | "ecs" | "asg";
 }) {
   if (resources.length === 0) {
     return (
@@ -395,6 +417,11 @@ function ResourceSection({
                 <div className="text-xs text-muted-foreground mt-1">
                   Desired Count: {res.last_state.desiredCount} → Running:{" "}
                   {res.last_state.runningCount}
+                </div>
+              )}
+              {type === "asg" && res.last_state && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  Capacity: Min {res.last_state.minSize} / Max {res.last_state.maxSize} / Desired {res.last_state.desiredCapacity}
                 </div>
               )}
             </div>

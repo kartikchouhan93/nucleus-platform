@@ -51,7 +51,7 @@ export interface Schedule {
 
 export interface ScheduleResource {
     id: string;
-    type: 'ec2' | 'ecs' | 'rds';
+    type: 'ec2' | 'ecs' | 'rds' | 'asg';
     name?: string;
     arn: string;
     clusterArn?: string;  // Required for ECS services
@@ -96,6 +96,7 @@ export interface ScheduleExecutionMetadata {
     ec2: EC2ResourceExecution[];
     ecs: ECSResourceExecution[];
     rds: RDSResourceExecution[];
+    asg: ASGResourceExecution[];
 }
 
 export interface EC2ResourceExecution {
@@ -134,6 +135,19 @@ export interface RDSResourceExecution {
     last_state: {
         dbInstanceStatus: string;
         dbInstanceClass?: string;
+    };
+}
+
+export interface ASGResourceExecution {
+    arn: string;
+    resourceId: string;
+    action: 'start' | 'stop' | 'skip';
+    status: 'success' | 'failed';
+    error?: string;
+    last_state: {
+        minSize: number;
+        maxSize: number;
+        desiredCapacity: number;
     };
 }
 

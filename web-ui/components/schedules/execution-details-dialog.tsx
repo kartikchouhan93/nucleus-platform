@@ -90,6 +90,7 @@ export function ExecutionDetailsDialog({
   const ec2Resources = metadata.ec2 || [];
   const rdsResources = metadata.rds || [];
   const ecsResources = metadata.ecs || [];
+  const asgResources = metadata.asg || [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -160,12 +161,16 @@ export function ExecutionDetailsDialog({
                 <TabsTrigger value="ecs" disabled={ecsResources.length === 0}>
                   ECS ({ecsResources.length})
                 </TabsTrigger>
+                <TabsTrigger value="asg" disabled={asgResources.length === 0}>
+                  ASG ({asgResources.length})
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="all" className="space-y-4 mt-4">
                 {ec2Resources.length === 0 &&
                 rdsResources.length === 0 &&
-                ecsResources.length === 0 ? (
+                ecsResources.length === 0 &&
+                asgResources.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
                     <p>No detailed resource information available.</p>
@@ -194,6 +199,14 @@ export function ExecutionDetailsDialog({
                         icon={<Box className="h-4 w-4" />}
                         resources={ecsResources}
                         type="ecs"
+                      />
+                    )}
+                    {asgResources.length > 0 && (
+                      <ResourceSection
+                        title="Auto Scaling Groups"
+                        icon={<Cpu className="h-4 w-4" />}
+                        resources={asgResources}
+                        type="asg"
                       />
                     )}
                   </div>
@@ -226,6 +239,15 @@ export function ExecutionDetailsDialog({
                   type="ecs"
                 />
               </TabsContent>
+
+              <TabsContent value="asg" className="mt-4">
+                <ResourceSection
+                  title="Auto Scaling Groups"
+                  icon={<Cpu className="h-4 w-4" />}
+                  resources={asgResources}
+                  type="asg"
+                />
+              </TabsContent>
             </Tabs>
           </div>
         </div>
@@ -243,7 +265,7 @@ function ResourceSection({
   title: string;
   icon: React.ReactNode;
   resources: any[];
-  type: "ec2" | "rds" | "ecs";
+  type: "ec2" | "rds" | "ecs" | "asg";
 }) {
   return (
     <Card>
@@ -278,6 +300,11 @@ function ResourceSection({
                 {type === "ecs" && res.last_state && (
                     <div className="text-xs text-muted-foreground mt-1">
                         Desired Count: {res.last_state.desiredCount} → Running: {res.last_state.runningCount}
+                    </div>
+                )}
+                {type === "asg" && res.last_state && (
+                    <div className="text-xs text-muted-foreground mt-1">
+                        Capacity: Min {res.last_state.minSize} / Max {res.last_state.maxSize} / Desired {res.last_state.desiredCapacity}
                     </div>
                 )}
               </div>
