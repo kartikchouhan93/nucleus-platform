@@ -4,7 +4,7 @@ import { getDynamoDBDocumentClient, APP_TABLE_NAME, handleDynamoDBError, DEFAULT
 import { AccountMetadata, UIAccount } from './types';
 import { AuditService } from './audit-service';
 import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
-import { ECSClient, ListClustersCommand, ListServicesCommand, DescribeServicesCommand } from '@aws-sdk/client-ecs';
+import { ECSClient, ListClustersCommand, ListServicesCommand, DescribeServicesCommand, DescribeCapacityProvidersCommand } from '@aws-sdk/client-ecs';
 import { RDSClient, DescribeDBInstancesCommand } from '@aws-sdk/client-rds';
 import { EC2Client, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
 import { AutoScalingClient, DescribeAutoScalingGroupsCommand } from '@aws-sdk/client-auto-scaling';
@@ -581,13 +581,21 @@ export class AccountService {
 
             const resources: Array<{ id: string; type: 'ec2' | 'ecs' | 'rds' | 'asg'; name: string; arn: string; clusterArn?: string }> = [];
 
-            // 2. Scan EC2
+            // 2. Scan EC2 (excluding ASG-managed instances)
             try {
                 const ec2Client = new EC2Client({ region, credentials });
                 const ec2Response = await ec2Client.send(new DescribeInstancesCommand({}));
                 ec2Response.Reservations?.forEach(reservation => {
                     reservation.Instances?.forEach(instance => {
                         if (instance.InstanceId && instance.State?.Name !== 'terminated') {
+                            // Filter out instances that are part of an Auto Scaling Group
+                            // ASG-managed instances have the 'aws:autoscaling:groupName' tag
+                            const asgTag = instance.Tags?.find(t => t.Key === 'aws:autoscaling:groupName');
+                            if (asgTag) {
+                                // Skip instances managed by ASG - they should be managed via ASG tab
+                                return;
+                            }
+
                             const nameTag = instance.Tags?.find(t => t.Key === 'Name')?.Value;
                             resources.push({
                                 id: instance.InstanceId,
@@ -666,12 +674,36 @@ export class AccountService {
                 console.error('Error scanning RDS:', e);
             }
 
-            // 5. Scan ASG
+            // 5. Scan ASG (excluding ECS capacity provider ASGs)
             try {
+                // First, get ASGs that are ECS capacity providers (to exclude them)
+                const ecsCapacityProviderAsgArns = new Set<string>();
+                try {
+                    const ecsClientForCp = new ECSClient({ region, credentials });
+                    const capacityProvidersResponse = await ecsClientForCp.send(
+                        new DescribeCapacityProvidersCommand({})
+                    );
+                    capacityProvidersResponse.capacityProviders?.forEach(cp => {
+                        if (cp.autoScalingGroupProvider?.autoScalingGroupArn) {
+                            ecsCapacityProviderAsgArns.add(cp.autoScalingGroupProvider.autoScalingGroupArn);
+                        }
+                    });
+                    console.log(`Found ${ecsCapacityProviderAsgArns.size} ECS capacity provider ASGs to exclude`);
+                } catch (ecsErr) {
+                    console.error('Error fetching ECS capacity providers:', ecsErr);
+                    // Continue with ASG scan even if capacity provider check fails
+                }
+
                 const asgClient = new AutoScalingClient({ region, credentials });
                 const asgResponse = await asgClient.send(new DescribeAutoScalingGroupsCommand({}));
                 asgResponse.AutoScalingGroups?.forEach(asg => {
                     if (asg.AutoScalingGroupName) {
+                        // Filter out ASGs that are ECS capacity providers
+                        if (asg.AutoScalingGroupARN && ecsCapacityProviderAsgArns.has(asg.AutoScalingGroupARN)) {
+                            // Skip ASGs used as ECS capacity providers
+                            return;
+                        }
+
                         resources.push({
                             id: asg.AutoScalingGroupName,
                             type: 'asg',
