@@ -88,7 +88,7 @@ export function truncateOutput(text: string, maxChars: number = 500): string {
 
 // Get recent messages safely - ensuring tool call/result pairs are kept together
 // Also filters out empty messages that cause Bedrock API errors
-export function getRecentMessages(messages: BaseMessage[], maxMessages: number = 8): BaseMessage[] {
+export function getRecentMessages(messages: BaseMessage[], maxMessages: number = 30): BaseMessage[] {
     // First, filter out messages with empty content (but keep AIMessages with tool_calls)
     const validMessages = messages.filter(msg => {
         const content = msg.content;
@@ -200,11 +200,17 @@ export function getRecentMessages(messages: BaseMessage[], maxMessages: number =
 }
 
 // Configuration for graph creation
+export interface AccountContext {
+    accountId: string;
+    accountName: string;
+}
+
 export interface GraphConfig {
     model: string;
     autoApprove: boolean;
-    accountId?: string;   // Optional: AWS account ID for context
-    accountName?: string; // Optional: AWS account name for display
+    accounts?: AccountContext[];   // Array of AWS accounts for multi-account querying
+    accountId?: string;   // Deprecated: Single account (kept for backwards compatibility)
+    accountName?: string; // Deprecated: Single account name
 }
 
 // --- State Definition ---

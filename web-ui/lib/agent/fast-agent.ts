@@ -25,7 +25,7 @@ import {
 
 // --- FAST GRAPH (Reflection Agent Mode) ---
 export function createFastGraph(config: GraphConfig) {
-    const { model: modelId, autoApprove, accountId, accountName } = config;
+    const { model: modelId, autoApprove, accounts, accountId, accountName } = config;
 
     // --- Model Initialization ---
     const model = new ChatBedrockConverse({
@@ -37,15 +37,32 @@ export function createFastGraph(config: GraphConfig) {
     });
 
     // Include AWS credentials tool for account-aware operations
-    // Include AWS credentials tool for account-aware operations
     const tools = [executeCommandTool, readFileTool, writeFileTool, lsTool, editFileTool, globTool, grepTool, webSearchTool, getAwsCredentialsTool];
     const modelWithTools = model.bindTools(tools);
     const toolNode = new ToolNode(tools);
 
-    // Build account context string for prompts
-    const accountContext = accountId
-        ? `\n\nIMPORTANT - AWS ACCOUNT CONTEXT:\nYou are operating in the context of AWS account: ${accountName || accountId} (ID: ${accountId}).\nBefore executing any AWS CLI commands, you MUST first call the get_aws_credentials tool with accountId="${accountId}" to create a session profile.\nThe tool will return a profile name. Use this profile with ALL subsequent AWS CLI commands by adding: --profile <profileName>\nExample: aws sts get-caller-identity --profile <profileName>\nNEVER use the host's default credentials - always use the profile returned from get_aws_credentials.`
-        : `\n\nNOTE: No AWS account is selected. If the user asks to perform AWS operations, inform them that they need to select an AWS account first.`;
+    // Build account context string for prompts - supports multi-account
+    let accountContext: string;
+    if (accounts && accounts.length > 0) {
+        const accountList = accounts.map(a => `  - ${a.accountName || a.accountId} (ID: ${a.accountId})`).join('\n');
+        accountContext = `\n\nIMPORTANT - MULTI-ACCOUNT AWS CONTEXT:
+You are operating across ${accounts.length} AWS account(s):
+${accountList}
+
+For EACH account you need to query:
+1. Call get_aws_credentials with the accountId to create a session profile
+2. Use the returned profile name with ALL subsequent AWS CLI commands: --profile <profileName>
+3. Clearly label outputs with the account name/ID for clarity`;
+    } else if (accountId) {
+        // Backwards compatibility for single account
+        accountContext = `\n\nIMPORTANT - AWS ACCOUNT CONTEXT:
+You are operating in the context of AWS account: ${accountName || accountId} (ID: ${accountId}).
+Before executing any AWS CLI commands, you MUST first call the get_aws_credentials tool with accountId="${accountId}" to create a session profile.
+The tool will return a profile name. Use this profile with ALL subsequent AWS CLI commands by adding: --profile <profileName>
+NEVER use the host's default credentials - always use the profile returned from get_aws_credentials.`;
+    } else {
+        accountContext = `\n\nNOTE: No AWS account is selected. If the user asks to perform AWS operations, inform them that they need to select an AWS account first.`;
+    }
 
     // --- GENERATOR NODE (Agent) ---
     async function agentNode(state: ReflectionState): Promise<Partial<ReflectionState>> {
@@ -66,14 +83,18 @@ IMPORTANT: You are a READ-ONLY agent.
 - Your AWS IAM role is read-only.
 - If asked to perform a mutation, politely refuse and explain your read-only limitations.
 
+CONVERSATION CONTINUITY: Review the conversation history carefully.
+If this is a follow-up question, use the context from previous exchanges to provide accurate and relevant responses.
+Reference previous findings, tool outputs, and context when answering follow-up questions.
+
 ${accountContext}
 
 Answer the user's request directly.
 If you receive a critique from the Reflector, update your previous answer to address the critique.
 Be concise and effective.`);
 
-        // Filter messages to get a valid context window
-        const response = await modelWithTools.invoke([systemPrompt, ...getRecentMessages(messages, 20)]);
+        // Filter messages to get a valid context window - increased for better follow-up handling
+        const response = await modelWithTools.invoke([systemPrompt, ...getRecentMessages(messages, 30)]);
 
         if ('tool_calls' in response && response.tool_calls && response.tool_calls.length > 0) {
             console.log(`\n🛠️ [FAST AGENT] Tool Calls Generated:`);

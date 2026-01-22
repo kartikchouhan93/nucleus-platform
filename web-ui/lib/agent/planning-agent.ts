@@ -26,7 +26,7 @@ import {
 
 // Factory function to create a configured reflection graph
 export function createReflectionGraph(config: GraphConfig) {
-    const { model: modelId, autoApprove, accountId, accountName } = config;
+    const { model: modelId, autoApprove, accounts, accountId, accountName } = config;
 
     // --- Model Initialization ---
     const model = new ChatBedrockConverse({
@@ -38,15 +38,40 @@ export function createReflectionGraph(config: GraphConfig) {
     });
 
     // Include AWS credentials tool for account-aware operations
-    // Include AWS credentials tool for account-aware operations
     const tools = [executeCommandTool, readFileTool, writeFileTool, lsTool, editFileTool, globTool, grepTool, webSearchTool, getAwsCredentialsTool];
     const modelWithTools = model.bindTools(tools);
     const toolNode = new ToolNode(tools);
 
-    // Build account context string for prompts
-    const accountContext = accountId
-        ? `\n\nIMPORTANT - AWS ACCOUNT CONTEXT:\nYou are operating in the context of AWS account: ${accountName || accountId} (ID: ${accountId}).\nBefore executing any AWS CLI commands, you MUST first call the get_aws_credentials tool with accountId="${accountId}" to create a session profile.\nThe tool will return a profile name. Use this profile with ALL subsequent AWS CLI commands by adding: --profile <profileName>\nExample: aws sts get-caller-identity --profile <profileName>\nNEVER use the host's default credentials - always use the profile returned from get_aws_credentials.`
-        : `\n\nNOTE: No AWS account is selected. If the user asks to perform AWS operations, inform them that they need to select an AWS account first.`;
+    // Build account context string for prompts - supports multi-account
+    let accountContext: string;
+    if (accounts && accounts.length > 0) {
+        const accountList = accounts.map(a => `  - ${a.accountName || a.accountId} (ID: ${a.accountId})`).join('\n');
+        accountContext = `\n\nIMPORTANT - MULTI-ACCOUNT AWS CONTEXT:
+You are operating across ${accounts.length} AWS account(s):
+${accountList}
+
+For EACH account you need to query:
+1. Call get_aws_credentials with the accountId to create a session profile
+2. Use the returned profile name with ALL subsequent AWS CLI commands: --profile <profileName>
+3. Clearly label outputs with the account name/ID for clarity
+
+Example workflow for multi-account:
+- Call get_aws_credentials(accountId="${accounts[0].accountId}") → get profile1
+- Run: aws sts get-caller-identity --profile profile1
+- Call get_aws_credentials(accountId="${accounts.length > 1 ? accounts[1].accountId : accounts[0].accountId}") → get profile2
+- Run: aws sts get-caller-identity --profile profile2
+- Aggregate and compare results across accounts`;
+    } else if (accountId) {
+        // Backwards compatibility for single account
+        accountContext = `\n\nIMPORTANT - AWS ACCOUNT CONTEXT:
+You are operating in the context of AWS account: ${accountName || accountId} (ID: ${accountId}).
+Before executing any AWS CLI commands, you MUST first call the get_aws_credentials tool with accountId="${accountId}" to create a session profile.
+The tool will return a profile name. Use this profile with ALL subsequent AWS CLI commands by adding: --profile <profileName>
+Example: aws sts get-caller-identity --profile <profileName>
+NEVER use the host's default credentials - always use the profile returned from get_aws_credentials.`;
+    } else {
+        accountContext = `\n\nNOTE: No AWS account is selected. If the user asks to perform AWS operations, inform them that they need to select an AWS account first.`;
+    }
 
     // --- PLANNER NODE ---
     async function planNode(state: ReflectionState): Promise<Partial<ReflectionState>> {
@@ -173,7 +198,7 @@ NOTE: AWS Cost Explorer only provides historical data for the last 14 months. Do
 IMPORTANT: You should use tools to accomplish the task if necessary. If the task is a simple question or greeting that doesn't require tools, you may answer directly.
 After using tools (or if no tools are needed), provide a brief summary of what you accomplished or the answer.`);
 
-        const response = await modelWithTools.invoke([executorSystemPrompt, ...getRecentMessages(messages, 10)]);
+        const response = await modelWithTools.invoke([executorSystemPrompt, ...getRecentMessages(messages, 25)]);
 
         if ('tool_calls' in response && response.tool_calls && response.tool_calls.length > 0) {
             console.log(`\n🛠️ [EXECUTOR] Tool Calls Generated:`);

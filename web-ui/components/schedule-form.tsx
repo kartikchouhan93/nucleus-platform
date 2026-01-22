@@ -38,12 +38,26 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Calendar, Save, Loader2, Server, RefreshCw } from "lucide-react";
+import { Clock, Calendar, Save, Loader2, Server, RefreshCw, Check, ChevronsUpDown } from "lucide-react";
 import { ClientScheduleService } from "@/lib/client-schedule-service";
 import { ClientAccountService } from "@/lib/client-account-service";
 import { UIAccount, Schedule, UISchedule } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const scheduleFormSchema = z.object({
   name: z.string().min(1, "Schedule name is required"),
@@ -102,6 +116,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
     asg: Array<{ id: string, name: string, type: 'asg', arn: string }>;
   }>({ ec2: [], ecs: [], rds: [], asg: [] });
   const [hasScanned, setHasScanned] = useState(false);
+  const [openAccountCombobox, setOpenAccountCombobox] = useState(false);
 
   const form = useForm<ScheduleFormValues>({
     resolver: zodResolver(scheduleFormSchema),
@@ -124,7 +139,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
     // Fetch accounts on mount
     const fetchAccounts = async () => {
       try {
-        const result = await ClientAccountService.getAccounts({ statusFilter: 'active', connectionFilter: 'connected' });
+        const result = await ClientAccountService.getAccounts({ statusFilter: 'active', connectionFilter: 'connected', limit: 1000 });
         setAccounts(result.accounts);
       } catch (error) {
         console.error("Failed to fetch accounts:", error);
@@ -269,32 +284,61 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
               control={form.control}
               name="accountId"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="flex flex-col">
                   <FormLabel>AWS Account</FormLabel>
-                   {/* If editing, forbid changing account to prevent complex state issues for now, or allow it but carefully */}
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                    disabled={isEditing} 
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select an account" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {accounts.map((account) => (
-                        <SelectItem key={account.accountId} value={account.accountId}>
-                          {account.name} ({account.accountId})
-                        </SelectItem>
-                      ))}
-                      {accounts.length === 0 && (
-                         <div className="p-2 text-sm text-muted-foreground text-center">
-                           No connected accounts found.
-                         </div>
-                      )}
-                    </SelectContent>
-                  </Select>
+                   {/* Searchable Dropdown (Combobox) */}
+                   <Popover open={openAccountCombobox} onOpenChange={setOpenAccountCombobox}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={openAccountCombobox}
+                          className={cn(
+                            "w-full justify-between",
+                            !field.value && "text-muted-foreground"
+                          )}
+                          disabled={isEditing}
+                        >
+                          {field.value
+                            ? accounts.find((account) => account.accountId === field.value)?.name + ` (${field.value})`
+                            : "Select an account"}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[400px] p-0">
+                      <Command>
+                        <CommandInput placeholder="Search account..." />
+                        <CommandList>
+                          <CommandEmpty>No account found.</CommandEmpty>
+                          <CommandGroup>
+                            {accounts.map((account) => (
+                              <CommandItem
+                                value={`${account.name} ${account.accountId}`}
+                                key={account.accountId}
+                                onSelect={() => {
+                                  form.setValue("accountId", account.accountId);
+                                  setOpenAccountCombobox(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    account.accountId === field.value
+                                      ? "opacity-100"
+                                      : "opacity-0"
+                                  )}
+                                />
+                                {account.name} ({account.accountId})
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+
                   <FormDescription>
                     {isEditing ? "Account cannot be changed for existing schedules" : "Only connected accounts are shown"}
                   </FormDescription>
@@ -537,7 +581,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
             />
           </CardContent>
         </Card>
-
+        
         {/* Days of Week */}
         <Card>
           <CardHeader>
@@ -636,7 +680,7 @@ export function ScheduleForm({ initialData, isEditing = false }: ScheduleFormPro
               </div>
               
               <div className="text-sm text-muted-foreground pt-2">
-                 Resources Targeted: {selectedResources.length}
+                 Resources Targeted: {selectedResources.length} resources
               </div>
             </div>
           </CardContent>

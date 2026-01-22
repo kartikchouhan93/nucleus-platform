@@ -12,8 +12,8 @@ export class ClientAccountService {
         connectionFilter?: string;
         searchTerm?: string;
         limit?: number;
-        nextToken?: string;
-    }): Promise<{ accounts: UIAccount[], nextToken?: string }> {
+        page?: number;
+    }): Promise<{ accounts: UIAccount[], totalCount: number }> {
         try {
             console.log('ClientAccountService - Fetching accounts via API route', filters);
 
@@ -31,8 +31,8 @@ export class ClientAccountService {
             if (filters?.limit) {
                 params.append('limit', filters.limit.toString());
             }
-            if (filters?.nextToken) {
-                params.append('nextToken', filters.nextToken);
+            if (filters?.page) {
+                params.append('page', filters.page.toString());
             }
 
             const url = params.toString() ? `${this.baseUrl}?${params.toString()}` : this.baseUrl;
@@ -56,7 +56,7 @@ export class ClientAccountService {
             console.log('ClientAccountService - Successfully fetched accounts:', result.data.length);
             return {
                 accounts: result.data,
-                nextToken: result.nextToken
+                totalCount: result.totalCount || 0
             };
         } catch (error) {
             console.error('ClientAccountService - Error fetching accounts:', error);

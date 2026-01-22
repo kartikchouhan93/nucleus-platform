@@ -26,21 +26,31 @@ export default async function AccountsPage({ searchParams}: { searchParams: Sear
   const statusFilter = typeof resolvedSearchParams.status === 'string' ? resolvedSearchParams.status : 'all';
   const connectionFilter = typeof resolvedSearchParams.connection === 'string' ? resolvedSearchParams.connection : 'all';
   const searchTerm = typeof resolvedSearchParams.search === 'string' ? resolvedSearchParams.search : '';
-  // Fetch filtered accounts from DynamoDB on the server side
-  const { accounts } = await getAccounts({
+  const page = typeof resolvedSearchParams.page === 'string' ? parseInt(resolvedSearchParams.page) : 1;
+  const limit = typeof resolvedSearchParams.limit === 'string' ? parseInt(resolvedSearchParams.limit) : 10;
+  
+  // Fetch filtered accounts from DynamoDB on the server side with limit
+  const result = await getAccounts({
     statusFilter,
     connectionFilter,
-    searchTerm
+    searchTerm,
+    limit,
+    page
   });
   
   // Pass the pre-fetched data and initial filter states to the client component
   return <AccountsClient 
-    initialAccounts={accounts}
+    initialAccounts={result.accounts}
     initialFilters={{
       statusFilter,
       connectionFilter,
       searchTerm
     }} 
+    initialPagination={{
+        page,
+        limit,
+        total: result.totalCount || 0
+    }}
     statusFilters={statusFilters} 
     connectionFilters={connectionFilters} 
   />;
@@ -53,12 +63,15 @@ async function getAccounts(filters?: {
   statusFilter?: string;
   connectionFilter?: string;
   searchTerm?: string;
-}): Promise<{ accounts: UIAccount[], nextToken?: string }> {
+  limit?: number;
+  page?: number;
+}): Promise<{ accounts: UIAccount[], totalCount: number }> {
   try {
     const result = await AccountService.getAccounts(filters);
     return result;
   } catch (error) {
     console.error('Server-side: Error loading accounts from DynamoDB:', error);
-    return { accounts: [] };
+    return { accounts: [], totalCount: 0 };
   }
 }
+

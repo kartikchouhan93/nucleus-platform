@@ -13,14 +13,14 @@ export async function GET(request: NextRequest) {
         const connectionFilter = searchParams.get('connection') || undefined;
         const searchTerm = searchParams.get('search') || undefined;
         const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined;
-        const nextToken = searchParams.get('nextToken') || undefined;
+        const page = searchParams.get('page') ? parseInt(searchParams.get('page')!) : 1;
 
         const filters = {
             statusFilter,
             connectionFilter,
             searchTerm,
             limit,
-            nextToken
+            page
         };
 
         const result = await AccountService.getAccounts(filters);
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({
             success: true,
             data: result.accounts,
-            nextToken: result.nextToken
+            totalCount: result.totalCount
         });
     } catch (error) {
         console.error('API - Error fetching accounts:', error);

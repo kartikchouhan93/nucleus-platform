@@ -4,10 +4,10 @@ import { getDynamoDBDocumentClient, APP_TABLE_NAME, handleDynamoDBError, DEFAULT
 import { AccountMetadata, UIAccount } from './types';
 import { AuditService } from './audit-service';
 import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
-import { ECSClient, ListClustersCommand, ListServicesCommand, DescribeServicesCommand, DescribeCapacityProvidersCommand } from '@aws-sdk/client-ecs';
-import { RDSClient, DescribeDBInstancesCommand } from '@aws-sdk/client-rds';
-import { EC2Client, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
-import { AutoScalingClient, DescribeAutoScalingGroupsCommand } from '@aws-sdk/client-auto-scaling';
+import { ECSClient, ListClustersCommand, ListServicesCommand, DescribeServicesCommand, DescribeCapacityProvidersCommand, ListClustersCommandOutput, ListServicesCommandOutput, DescribeCapacityProvidersCommandOutput, DescribeServicesCommandOutput } from '@aws-sdk/client-ecs';
+import { RDSClient, DescribeDBInstancesCommand, DescribeDBInstancesCommandOutput } from '@aws-sdk/client-rds';
+import { EC2Client, DescribeInstancesCommand, DescribeInstancesCommandOutput } from '@aws-sdk/client-ec2';
+import { AutoScalingClient, DescribeAutoScalingGroupsCommand, DescribeAutoScalingGroupsCommandOutput } from '@aws-sdk/client-auto-scaling';
 
 // Define handleDynamoDBError if it's not properly imported
 const handleError = (error: any, operation: string) => {
@@ -31,48 +31,60 @@ export class AccountService {
     /**
      * Fetch all accounts from DynamoDB with optional filtering
      * Uses GSI1: gsi1pk = TYPE#ACCOUNT
+     * 
+     * When filters (search, status, connection) are applied, we fetch ALL records
+     * to ensure filtering works correctly, then apply client-side pagination.
+     * When no filters are applied, we use DynamoDB pagination for efficiency.
+     */
+    /**
+     * Fetch all accounts from DynamoDB with optional filtering
+     * Uses GSI1: gsi1pk = TYPE#ACCOUNT
+     * 
+     * We fetch ALL records to ensure filtering works correctly and to provide accurate total counts,
+     * then apply client-side pagination. This is suitable for the expected scale (< 1000 accounts).
      */
     static async getAccounts(filters?: {
         statusFilter?: string;
         connectionFilter?: string;
         searchTerm?: string;
         limit?: number;
-        nextToken?: string;
+        page?: number;
         tenantId?: string;
-    }): Promise<{ accounts: UIAccount[], nextToken?: string }> {
+    }): Promise<{ accounts: UIAccount[], totalCount: number }> {
         try {
             console.log('AccountService - Attempting to fetch accounts from DynamoDB', filters ? `with filters: ${JSON.stringify(filters)}` : '');
 
-            const limit = filters?.limit || 50;
-            let exclusiveStartKey;
+            const pageSize = filters?.limit || 10;
+            const page = filters?.page || 1;
 
-            if (filters?.nextToken) {
-                try {
-                    exclusiveStartKey = JSON.parse(Buffer.from(filters.nextToken, 'base64').toString('utf-8'));
-                } catch (e) {
-                    console.error('Invalid nextToken:', e);
-                }
-            }
+            // Fetch ALL accounts first (no limit) using recursive pagination
+            let allAccounts: UIAccount[] = [];
+            let lastEvaluatedKey: Record<string, any> | undefined = undefined;
 
-            const command = new QueryCommand({
-                TableName: APP_TABLE_NAME,
-                IndexName: 'GSI1',
-                KeyConditionExpression: 'gsi1pk = :pkVal',
-                ExpressionAttributeValues: {
-                    ':pkVal': 'TYPE#ACCOUNT',
-                },
-                Limit: limit,
-                ExclusiveStartKey: exclusiveStartKey,
-            });
+            do {
+                const fetchCommand = new QueryCommand({
+                    TableName: APP_TABLE_NAME,
+                    IndexName: 'GSI1',
+                    KeyConditionExpression: 'gsi1pk = :pkVal',
+                    ExpressionAttributeValues: {
+                        ':pkVal': 'TYPE#ACCOUNT',
+                    },
+                    ExclusiveStartKey: lastEvaluatedKey as Record<string, any> | undefined,
+                });
+                const fetchResponse = await getDynamoDBDocumentClient().send(fetchCommand) as { Items?: any[], LastEvaluatedKey?: Record<string, any> };
+                const pageAccounts = (fetchResponse.Items || []).map((item: any) => this.transformToUIAccount(item));
+                allAccounts = allAccounts.concat(pageAccounts);
+                lastEvaluatedKey = fetchResponse.LastEvaluatedKey;
+            } while (lastEvaluatedKey);
 
-            const response = await getDynamoDBDocumentClient().send(command);
-            console.log('AccountService - Successfully fetched accounts:', response.Items?.length || 0);
+            console.log('AccountService - Fetched all accounts:', allAccounts.length);
 
-            let accounts = (response.Items || []).map(item => this.transformToUIAccount(item));
+            // Apply filters in memory
+            let filteredAccounts = allAccounts;
 
             if (filters?.searchTerm && filters.searchTerm.trim() !== '') {
                 const searchTerm = filters.searchTerm.toLowerCase();
-                accounts = accounts.filter(account =>
+                filteredAccounts = filteredAccounts.filter(account =>
                     account.name.toLowerCase().includes(searchTerm) ||
                     account.accountId.toLowerCase().includes(searchTerm) ||
                     (account.description && account.description.toLowerCase().includes(searchTerm)) ||
@@ -82,21 +94,27 @@ export class AccountService {
 
             if (filters?.statusFilter && filters.statusFilter !== 'all') {
                 const isActive = filters.statusFilter === 'active';
-                accounts = accounts.filter(account => account.active === isActive);
+                filteredAccounts = filteredAccounts.filter(account => account.active === isActive);
             }
 
             if (filters?.connectionFilter && filters.connectionFilter !== 'all') {
-                if (filters.connectionFilter === 'connected') {
-                    accounts = accounts.filter(account => account.connectionStatus === 'connected');
-                }
+                filteredAccounts = filteredAccounts.filter(account =>
+                    account.connectionStatus === filters.connectionFilter
+                );
             }
 
-            let nextToken: string | undefined = undefined;
-            if (response.LastEvaluatedKey) {
-                nextToken = Buffer.from(JSON.stringify(response.LastEvaluatedKey)).toString('base64');
-            }
+            const totalCount = filteredAccounts.length;
+            console.log('AccountService - Filtered count:', totalCount);
 
-            return { accounts, nextToken };
+            // Apply pagination on filtered results
+            const startIndex = (page - 1) * pageSize;
+            const endIndex = startIndex + pageSize;
+            const paginatedAccounts = filteredAccounts.slice(startIndex, endIndex);
+
+            return {
+                accounts: paginatedAccounts,
+                totalCount: totalCount
+            };
         } catch (error: any) {
             console.error('AccountService - Error fetching accounts:', error);
             throw new Error('Failed to fetch accounts from database');
@@ -584,28 +602,34 @@ export class AccountService {
             // 2. Scan EC2 (excluding ASG-managed instances)
             try {
                 const ec2Client = new EC2Client({ region, credentials });
-                const ec2Response = await ec2Client.send(new DescribeInstancesCommand({}));
-                ec2Response.Reservations?.forEach(reservation => {
-                    reservation.Instances?.forEach(instance => {
-                        if (instance.InstanceId && instance.State?.Name !== 'terminated') {
-                            // Filter out instances that are part of an Auto Scaling Group
-                            // ASG-managed instances have the 'aws:autoscaling:groupName' tag
-                            const asgTag = instance.Tags?.find(t => t.Key === 'aws:autoscaling:groupName');
-                            if (asgTag) {
-                                // Skip instances managed by ASG - they should be managed via ASG tab
-                                return;
-                            }
+                let nextToken: string | undefined = undefined;
 
-                            const nameTag = instance.Tags?.find(t => t.Key === 'Name')?.Value;
-                            resources.push({
-                                id: instance.InstanceId,
-                                type: 'ec2',
-                                name: nameTag || instance.InstanceId,
-                                arn: `arn:aws:ec2:${region}:${accountId}:instance/${instance.InstanceId}`
-                            });
-                        }
+                do {
+                    const ec2Response: DescribeInstancesCommandOutput = await ec2Client.send(new DescribeInstancesCommand({ NextToken: nextToken }));
+                    ec2Response.Reservations?.forEach(reservation => {
+                        reservation.Instances?.forEach(instance => {
+                            if (instance.InstanceId && instance.State?.Name !== 'terminated') {
+                                // Filter out instances that are part of an Auto Scaling Group
+                                // ASG-managed instances have the 'aws:autoscaling:groupName' tag
+                                const asgTag = instance.Tags?.find(t => t.Key === 'aws:autoscaling:groupName');
+                                if (asgTag) {
+                                    // Skip instances managed by ASG - they should be managed via ASG tab
+                                    return;
+                                }
+
+                                const nameTag = instance.Tags?.find(t => t.Key === 'Name')?.Value;
+                                resources.push({
+                                    id: instance.InstanceId,
+                                    type: 'ec2',
+                                    name: nameTag || instance.InstanceId,
+                                    arn: `arn:aws:ec2:${region}:${accountId}:instance/${instance.InstanceId}`
+                                });
+                            }
+                        });
                     });
-                });
+                    nextToken = ec2Response.NextToken;
+                } while (nextToken);
+
             } catch (e) {
                 console.error('Error scanning EC2:', e);
             }
@@ -615,38 +639,58 @@ export class AccountService {
                 const ecsClient = new ECSClient({ region, credentials });
 
                 // First, get all clusters
-                const clustersResponse = await ecsClient.send(new ListClustersCommand({}));
-                const clusterArns = clustersResponse.clusterArns || [];
+                let clusterArns: string[] = [];
+                let nextToken: string | undefined = undefined;
+
+                do {
+                    const clustersResponse: ListClustersCommandOutput = await ecsClient.send(new ListClustersCommand({ nextToken }));
+                    if (clustersResponse.clusterArns) {
+                        clusterArns = [...clusterArns, ...clustersResponse.clusterArns];
+                    }
+                    nextToken = clustersResponse.nextToken;
+                } while (nextToken);
 
                 // For each cluster, list its services
                 for (const clusterArn of clusterArns) {
                     const clusterName = clusterArn.split('/').pop() || clusterArn;
+                    let serviceArns: string[] = [];
+                    let servicesNextToken: string | undefined = undefined;
 
                     try {
-                        const servicesResponse = await ecsClient.send(new ListServicesCommand({
-                            cluster: clusterArn,
-                        }));
-
-                        const serviceArns = servicesResponse.serviceArns || [];
-
-                        if (serviceArns.length > 0) {
-                            // Get service details for display name and state info
-                            const describeResponse = await ecsClient.send(new DescribeServicesCommand({
+                        // List all services in cluster
+                        do {
+                            const servicesResponse: ListServicesCommandOutput = await ecsClient.send(new ListServicesCommand({
                                 cluster: clusterArn,
-                                services: serviceArns,
+                                nextToken: servicesNextToken
                             }));
+                            if (servicesResponse.serviceArns) {
+                                serviceArns = [...serviceArns, ...servicesResponse.serviceArns];
+                            }
+                            servicesNextToken = servicesResponse.nextToken;
+                        } while (servicesNextToken);
 
-                            describeResponse.services?.forEach(service => {
-                                if (service.serviceArn && service.serviceName) {
-                                    resources.push({
-                                        id: service.serviceName,
-                                        type: 'ecs',
-                                        name: `${clusterName}/${service.serviceName}`,
-                                        arn: service.serviceArn,
-                                        clusterArn: clusterArn, // Include cluster ARN for scheduler
-                                    });
-                                }
-                            });
+                        // Describe services in batches of 10 (API limit)
+                        const batchSize = 10;
+                        for (let i = 0; i < serviceArns.length; i += batchSize) {
+                            const batch = serviceArns.slice(i, i + batchSize);
+                            if (batch.length > 0) {
+                                const describeResponse: DescribeServicesCommandOutput = await ecsClient.send(new DescribeServicesCommand({
+                                    cluster: clusterArn,
+                                    services: batch,
+                                }));
+
+                                describeResponse.services?.forEach(service => {
+                                    if (service.serviceArn && service.serviceName) {
+                                        resources.push({
+                                            id: service.serviceName,
+                                            type: 'ecs',
+                                            name: `${clusterName}/${service.serviceName}`,
+                                            arn: service.serviceArn,
+                                            clusterArn: clusterArn, // Include cluster ARN for scheduler
+                                        });
+                                    }
+                                });
+                            }
                         }
                     } catch (serviceError) {
                         console.error(`Error scanning ECS services in cluster ${clusterName}:`, serviceError);
@@ -659,17 +703,23 @@ export class AccountService {
             // 4. Scan RDS
             try {
                 const rdsClient = new RDSClient({ region, credentials });
-                const rdsResponse = await rdsClient.send(new DescribeDBInstancesCommand({}));
-                rdsResponse.DBInstances?.forEach(instance => {
-                    if (instance.DBInstanceIdentifier) {
-                        resources.push({
-                            id: instance.DBInstanceIdentifier,
-                            type: 'rds',
-                            name: instance.DBInstanceIdentifier,
-                            arn: instance.DBInstanceArn || `arn:aws:rds:${region}:${accountId}:db:${instance.DBInstanceIdentifier}`
-                        });
-                    }
-                });
+                let marker: string | undefined = undefined;
+
+                do {
+                    const rdsResponse: DescribeDBInstancesCommandOutput = await rdsClient.send(new DescribeDBInstancesCommand({ Marker: marker }));
+                    rdsResponse.DBInstances?.forEach(instance => {
+                        if (instance.DBInstanceIdentifier) {
+                            resources.push({
+                                id: instance.DBInstanceIdentifier,
+                                type: 'rds',
+                                name: instance.DBInstanceIdentifier,
+                                arn: instance.DBInstanceArn || `arn:aws:rds:${region}:${accountId}:db:${instance.DBInstanceIdentifier}`
+                            });
+                        }
+                    });
+                    marker = rdsResponse.Marker;
+                } while (marker);
+
             } catch (e) {
                 console.error('Error scanning RDS:', e);
             }
@@ -680,14 +730,20 @@ export class AccountService {
                 const ecsCapacityProviderAsgArns = new Set<string>();
                 try {
                     const ecsClientForCp = new ECSClient({ region, credentials });
-                    const capacityProvidersResponse = await ecsClientForCp.send(
-                        new DescribeCapacityProvidersCommand({})
-                    );
-                    capacityProvidersResponse.capacityProviders?.forEach(cp => {
-                        if (cp.autoScalingGroupProvider?.autoScalingGroupArn) {
-                            ecsCapacityProviderAsgArns.add(cp.autoScalingGroupProvider.autoScalingGroupArn);
-                        }
-                    });
+                    let nextTokenCp: string | undefined = undefined;
+
+                    do {
+                        const capacityProvidersResponse: DescribeCapacityProvidersCommandOutput = await ecsClientForCp.send(
+                            new DescribeCapacityProvidersCommand({ nextToken: nextTokenCp })
+                        );
+                        capacityProvidersResponse.capacityProviders?.forEach(cp => {
+                            if (cp.autoScalingGroupProvider?.autoScalingGroupArn) {
+                                ecsCapacityProviderAsgArns.add(cp.autoScalingGroupProvider.autoScalingGroupArn);
+                            }
+                        });
+                        nextTokenCp = capacityProvidersResponse.nextToken;
+                    } while (nextTokenCp);
+
                     console.log(`Found ${ecsCapacityProviderAsgArns.size} ECS capacity provider ASGs to exclude`);
                 } catch (ecsErr) {
                     console.error('Error fetching ECS capacity providers:', ecsErr);
@@ -695,23 +751,29 @@ export class AccountService {
                 }
 
                 const asgClient = new AutoScalingClient({ region, credentials });
-                const asgResponse = await asgClient.send(new DescribeAutoScalingGroupsCommand({}));
-                asgResponse.AutoScalingGroups?.forEach(asg => {
-                    if (asg.AutoScalingGroupName) {
-                        // Filter out ASGs that are ECS capacity providers
-                        if (asg.AutoScalingGroupARN && ecsCapacityProviderAsgArns.has(asg.AutoScalingGroupARN)) {
-                            // Skip ASGs used as ECS capacity providers
-                            return;
-                        }
+                let nextToken: string | undefined = undefined;
 
-                        resources.push({
-                            id: asg.AutoScalingGroupName,
-                            type: 'asg',
-                            name: asg.AutoScalingGroupName,
-                            arn: asg.AutoScalingGroupARN || `arn:aws:autoscaling:${region}:${accountId}:autoScalingGroup:uuid:autoScalingGroupName/${asg.AutoScalingGroupName}`
-                        });
-                    }
-                });
+                do {
+                    const asgResponse: DescribeAutoScalingGroupsCommandOutput = await asgClient.send(new DescribeAutoScalingGroupsCommand({ NextToken: nextToken }));
+                    asgResponse.AutoScalingGroups?.forEach(asg => {
+                        if (asg.AutoScalingGroupName) {
+                            // Filter out ASGs that are ECS capacity providers
+                            if (asg.AutoScalingGroupARN && ecsCapacityProviderAsgArns.has(asg.AutoScalingGroupARN)) {
+                                // Skip ASGs used as ECS capacity providers
+                                return;
+                            }
+
+                            resources.push({
+                                id: asg.AutoScalingGroupName,
+                                type: 'asg',
+                                name: asg.AutoScalingGroupName,
+                                arn: asg.AutoScalingGroupARN || `arn:aws:autoscaling:${region}:${accountId}:autoScalingGroup:uuid:autoScalingGroupName/${asg.AutoScalingGroupName}`
+                            });
+                        }
+                    });
+                    nextToken = asgResponse.NextToken;
+                } while (nextToken);
+
             } catch (e) {
                 console.error('Error scanning ASG:', e);
             }

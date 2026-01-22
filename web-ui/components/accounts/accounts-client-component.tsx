@@ -22,13 +22,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Server,
   Plus,
-  Download,
   RefreshCw,
   Globe,
   Shield,
   Loader2,
   AlertCircle,
-  Upload,
 } from "lucide-react";
 import { AccountsTable } from "@/components/accounts/accounts-table";
 import { AccountsGrid } from "@/components/accounts/accounts-grid";
@@ -39,6 +37,13 @@ import { UIAccount } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { useIsFirstRender } from "@/hooks/use-first-render";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 
 interface FilterOption {
   value: string;
@@ -52,6 +57,11 @@ interface AccountsClientProps {
     connectionFilter: string;
     searchTerm: string;
   };
+  initialPagination?: {
+    page: number;
+    limit: number;
+    total: number;
+  };
   statusFilters: FilterOption[];
   connectionFilters: FilterOption[];
 }
@@ -63,53 +73,51 @@ interface AccountsClientProps {
 export default function AccountsClient({
   initialAccounts,
   initialFilters,
+  initialPagination,
   statusFilters,
   connectionFilters,
 }: AccountsClientProps) {
   const router = useRouter();
+  const { toast } = useToast();
 
   // Data state
   const [accounts, setAccounts] = useState<UIAccount[]>(initialAccounts);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [totalItems, setTotalItems] = useState(initialPagination?.total || initialAccounts.length);
 
-  // UI state - initialize with server provided values or defaults
+  // Effective filters (used for fetching data)
   const [searchTerm, setSearchTerm] = useState(initialFilters?.searchTerm || "");
   const [statusFilter, setStatusFilter] = useState(initialFilters?.statusFilter || "all");
   const [connectionFilter, setConnectionFilter] = useState(initialFilters?.connectionFilter || "all");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(initialPagination?.page || 1);
+  const [limit, setLimit] = useState(initialPagination?.limit || 10);
+
+  // Local UI state for filters (pending application)
+  const [localSearchTerm, setLocalSearchTerm] = useState(initialFilters?.searchTerm || "");
+  const [localStatusFilter, setLocalStatusFilter] = useState(initialFilters?.statusFilter || "all");
+  const [localConnectionFilter, setLocalConnectionFilter] = useState(initialFilters?.connectionFilter || "all");
+
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  
-  const { toast } = useToast();
 
-
-
-  // Load accounts from API
-  const loadAccounts = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const result = await ClientAccountService.getAccounts();
-      if (Array.isArray(result)) {
-           setAccounts(result);
-      } else {
-           setAccounts(result.accounts);
-      }
-    } catch (err) {
-      console.error("Error loading accounts:", err);
-      setError(err instanceof Error ? err.message : "Failed to load accounts");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Pagination state
-  const [pageTokens, setPageTokens] = useState<(string | undefined)[]>([undefined]);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [lastNextToken, setLastNextToken] = useState<string | undefined>(undefined);
-  const ITEMS_PER_PAGE = 10;
+  // Update URL with current filters and pagination
+  const updateUrlWithFilters = useCallback(() => {
+    const params = new URLSearchParams();
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (connectionFilter !== 'all') params.set('connection', connectionFilter);
+    if (searchTerm) params.set('search', searchTerm);
+    if (currentPage > 1) params.set('page', currentPage.toString());
+    params.set('limit', limit.toString());
+    
+    // Replace the current URL with the new one including filters
+    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+    window.history.replaceState({}, '', newUrl);
+  }, [statusFilter, connectionFilter, searchTerm, currentPage, limit]);
 
   // Load accounts with current filters
   const loadAccountsWithFilters = useCallback(async () => {
@@ -117,26 +125,26 @@ export default function AccountsClient({
       setLoading(true);
       setError(null);
       
-      const currentToken = pageTokens[currentPage];
+      updateUrlWithFilters();
 
       const filters = {
         statusFilter: statusFilter !== 'all' ? statusFilter : undefined,
         connectionFilter: connectionFilter !== 'all' ? connectionFilter : undefined,
         searchTerm: searchTerm || undefined,
-        limit: ITEMS_PER_PAGE,
-        nextToken: currentToken
+        limit: limit,
+        page: currentPage
       };
       
       const result = await ClientAccountService.getAccounts(filters);
       
-      // Handle the new return type object
       if (Array.isArray(result)) {
-          // Fallback if service returns array (shouldn't happen with updated service)
-          setAccounts(result);
-          setLastNextToken(undefined);
+           setAccounts(result);
       } else {
-          setAccounts(result.accounts);
-          setLastNextToken(result.nextToken);
+           setAccounts(result.accounts);
+           // Update total count if returned from API
+           if (result.totalCount !== undefined) {
+               setTotalItems(result.totalCount);
+           }
       }
       
     } catch (err) {
@@ -145,26 +153,9 @@ export default function AccountsClient({
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, connectionFilter, searchTerm, currentPage, pageTokens]); // Depend on currentPage and pageTokens
+  }, [statusFilter, connectionFilter, searchTerm, currentPage, limit, updateUrlWithFilters]);
 
-  const handleNextPage = () => {
-      if (lastNextToken) {
-          const newTokens = [...pageTokens];
-          if (newTokens.length <= currentPage + 1) {
-              newTokens.push(lastNextToken);
-          }
-          setPageTokens(newTokens);
-          setCurrentPage(currentPage + 1);
-      }
-  };
-
-  const handlePreviousPage = () => {
-      if (currentPage > 0) {
-          setCurrentPage(currentPage - 1);
-      }
-  };
-
-  // Handle account updates - this will be called by child components
+  // Handle account updates
   const handleAccountUpdated = (message?: string) => {
     loadAccountsWithFilters();
     if (message) {
@@ -179,53 +170,62 @@ export default function AccountsClient({
   // Track if this is the first render
   const isFirstRender = useIsFirstRender();
 
-  // Note: Auto-filtering on value change is removed. 
-  // Users must click "Apply Filters" or "Clear Filters" to trigger data refresh.
+  // Update URL and fetch data when EFFECTIVE filters change
+  useEffect(() => {
+    if (!isFirstRender) {
+      loadAccountsWithFilters();
+    }
+  }, [searchTerm, statusFilter, connectionFilter, currentPage, limit, loadAccountsWithFilters, isFirstRender]);
 
+  // Sync state with props when server re-renders
+  useEffect(() => {
+    setAccounts(initialAccounts);
+    setTotalItems(initialPagination?.total || initialAccounts.length);
+  }, [initialAccounts, initialPagination]);
 
-  // Use accounts directly since filtering is done server-side
-  const filteredAccounts = accounts;
+  const refreshAccounts = () => {
+    loadAccountsWithFilters();
+  };
+
+  const handleApplyFilter = () => {
+    setSearchTerm(localSearchTerm);
+    setStatusFilter(localStatusFilter);
+    setConnectionFilter(localConnectionFilter);
+    setCurrentPage(1); // Reset to first page
+  };
+
+  const handleClearFilter = () => {
+    // Reset local state
+    setLocalSearchTerm("");
+    setLocalStatusFilter("all");
+    setLocalConnectionFilter("all");
+    
+    // Reset effective state (triggers reload)
+    setSearchTerm("");
+    setStatusFilter("all");
+    setConnectionFilter("all");
+    setCurrentPage(1); // Reset to first page
+  };
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedAccounts(filteredAccounts.map((a) => a.id));
+      setSelectedAccounts(accounts.map((a) => a.id));
     } else {
       setSelectedAccounts([]);
     }
   };
 
-  const handleSelectAccount = (accountId: string, checked: boolean) => {
-    if (checked) {
-      setSelectedAccounts([...selectedAccounts, accountId]);
-    } else {
-      setSelectedAccounts(selectedAccounts.filter((id) => id !== accountId));
-    }
-  };
-
-  const exportAccounts = () => {
-    // TODO: Implement export functionality
-    console.log("Exporting accounts...");
-  };
-
-  const refreshAccounts = () => {
-    loadAccounts();
-  };
-
-  const handleCreateAccount = () => {
-    router.push("/accounts/create");
-  };
-
-  // Calculate summary statistics - fix connection status calculation
+  // Calculate summary statistics
   const stats = {
-    total: filteredAccounts.length,
-    active: filteredAccounts.filter((a) => a.active).length,
-    inactive: filteredAccounts.filter((a) => !a.active).length,
-    connected: filteredAccounts.filter((a) => a.active).length, // Use active status as connection indicator
-    totalSavings: filteredAccounts.reduce(
+    total: totalItems,
+    active: accounts.filter((a) => a.active).length, // Note: only for current page
+    inactive: accounts.filter((a) => !a.active).length, // Note: only for current page
+    connected: accounts.filter((a) => a.connectionStatus === 'connected').length, // Note: only for current page
+    totalSavings: accounts.reduce(
       (sum, a) => sum + (a.monthlySavings || 0),
       0
     ),
-    totalResources: filteredAccounts.reduce(
+    totalResources: accounts.reduce(
       (sum, a) => sum + (a.resourceCount || 0),
       0
     ),
@@ -252,10 +252,6 @@ export default function AccountsClient({
             />
             Refresh
           </Button>
-          {/* <Button onClick={() => setImportDialogOpen(true)} variant="outline">
-              <Upload className="mr-2 h-4 w-4" />
-              Import Accounts
-            </Button> */}
             <Button onClick={() => router.push("/accounts/create")}>
               <Plus className="mr-2 h-4 w-4" />
               Integrate Account
@@ -271,7 +267,7 @@ export default function AccountsClient({
             {error}
             <Button
               variant="link"
-              onClick={loadAccounts}
+              onClick={refreshAccounts}
               className="ml-2 p-0 h-auto"
             >
               Try again
@@ -281,7 +277,7 @@ export default function AccountsClient({
       )}
 
       {/* Loading State */}
-      {loading && !error && (
+      {loading && !error && accounts.length === 0 && (
         <Card>
           <CardContent className="flex items-center justify-center py-12">
             <div className="text-center">
@@ -294,220 +290,215 @@ export default function AccountsClient({
         </Card>
       )}
 
-      {/* Summary Stats - only show when not loading */}
-      {!loading && (
-        <div className="grid gap-4 md:grid-cols-5">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Total Accounts
-              </CardTitle>
-              <Server className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.total}</div>
-              <p className="text-xs text-muted-foreground">
-                {stats.active} active, {stats.inactive} inactive
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Connected</CardTitle>
-              <Shield className="h-4 w-4 text-success" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.connected}</div>
-              <p className="text-xs text-muted-foreground">
-                {stats.total > 0
-                  ? ((stats.connected / stats.total) * 100).toFixed(1)
-                  : 0}
-                % success rate
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Resources</CardTitle>
-              <Globe className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {stats.totalResources.toLocaleString()}
-              </div>
-              <p className="text-xs text-muted-foreground">managed resources</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Monthly Savings
-              </CardTitle>
-              <span className="text-success dark:text-success">$</span>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                ${stats.totalSavings.toLocaleString()}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                across all accounts
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Selected</CardTitle>
-              <Server className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {selectedAccounts.length}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {selectedAccounts.length > 0 && (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="p-0 h-auto text-xs"
-                    onClick={() => setBulkActionsOpen(true)}
-                  >
-                    Bulk actions
-                  </Button>
-                )}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Filters and Search - only show when not loading */}
-      {!loading && (
+      {/* Summary Stats */}
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
-          <CardHeader>
-            <CardTitle>Filters</CardTitle>
-            <CardDescription>
-              Search and filter accounts to find what you need
-            </CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Total Accounts
+            </CardTitle>
+            <Server className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <Input
-                  placeholder="Search accounts by name, ID, description, or creator..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full"
-                />
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Filter by status" />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusFilters.map((filter) => (
-                    <SelectItem key={filter.value} value={filter.value}>
-                      {filter.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={connectionFilter}
-                onValueChange={setConnectionFilter}
-              >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Filter by connection" />
-                </SelectTrigger>
-                <SelectContent>
-                  {connectionFilters.map((filter) => (
-                    <SelectItem key={filter.value} value={filter.value}>
-                      {filter.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="default"
-                onClick={() => {
-                  setCurrentPage(0);
-                  setPageTokens([undefined]);
-                  loadAccountsWithFilters();
-                }}
-              >
-                Apply Filters
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearchTerm("");
-                  setStatusFilter("all");
-                  setConnectionFilter("all");
-                  setCurrentPage(0);
-                  setPageTokens([undefined]);
-                  loadAccounts();
-                }}
-              >
-                Clear Filters
-              </Button>
-            </div>
+            <div className="text-2xl font-bold">{stats.total}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats.active} active (page)
+            </p>
           </CardContent>
         </Card>
-      )}
 
-      {/* View Toggle and Content - only show when not loading */}
-      {!loading && (
-        <Tabs
-          value={viewMode}
-          onValueChange={(value) => setViewMode(value as "table" | "grid")}
-        >
-          <TabsList>
-            <TabsTrigger value="table">Table View</TabsTrigger>
-            <TabsTrigger value="grid">Grid View</TabsTrigger>
-          </TabsList>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Connected</CardTitle>
+            <Shield className="h-4 w-4 text-success" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.connected}</div>
+             <p className="text-xs text-muted-foreground">
+              on current page
+            </p>
+          </CardContent>
+        </Card>
 
-          <TabsContent value="table" className="space-y-4">
-            <AccountsTable
-              accounts={filteredAccounts}
-              onAccountUpdated={handleAccountUpdated}
-            />
-          </TabsContent>
-
-          <TabsContent value="grid" className="space-y-4">
-            <AccountsGrid
-              accounts={filteredAccounts}
-              onAccountUpdated={handleAccountUpdated}
-            />
-          </TabsContent>
-        </Tabs>
-      )}
-
-      {/* Pagination Controls */}
-      {!loading && (currentPage > 0 || lastNextToken) && (
-        <div className="flex items-center justify-end space-x-2 py-4">
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={handlePreviousPage}
-                disabled={currentPage === 0}
-            >
-                Previous
-            </Button>
-            <div className="text-sm text-muted-foreground">
-                Page {currentPage + 1}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Resources</CardTitle>
+            <Globe className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.totalResources.toLocaleString()}
             </div>
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={handleNextPage}
-                disabled={!lastNextToken}
+            <p className="text-xs text-muted-foreground">managed resources</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Monthly Savings
+            </CardTitle>
+            <span className="text-success dark:text-success">$</span>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              ${stats.totalSavings.toLocaleString()}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              estimated savings
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Selected</CardTitle>
+            <Server className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {selectedAccounts.length}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {selectedAccounts.length > 0 && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="p-0 h-auto text-xs"
+                  onClick={() => setBulkActionsOpen(true)}
+                >
+                  Bulk actions
+                </Button>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters and Search */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Filters</CardTitle>
+          <CardDescription>
+            Search and filter accounts to find what you need
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <Input
+                placeholder="Search accounts by name, ID, description..."
+                value={localSearchTerm}
+                onChange={(e) => setLocalSearchTerm(e.target.value)}
+                className="w-full"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleApplyFilter();
+                }}
+              />
+            </div>
+            <Select value={localStatusFilter} onValueChange={setLocalStatusFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                {statusFilters.map((filter) => (
+                  <SelectItem key={filter.value} value={filter.value}>
+                    {filter.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={localConnectionFilter}
+              onValueChange={setLocalConnectionFilter}
             >
-                Next
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by connection" />
+              </SelectTrigger>
+              <SelectContent>
+                {connectionFilters.map((filter) => (
+                  <SelectItem key={filter.value} value={filter.value}>
+                    {filter.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="default"
+              onClick={handleApplyFilter}
+            >
+              Apply Filters
             </Button>
-        </div>
+            <Button
+              variant="outline"
+              onClick={handleClearFilter}
+            >
+              Clear Filters
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* View Toggle and Content */}
+      <Tabs
+        value={viewMode}
+        onValueChange={(value) => setViewMode(value as "table" | "grid")}
+      >
+        <TabsList>
+          <TabsTrigger value="table">Table View</TabsTrigger>
+          <TabsTrigger value="grid">Grid View</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="table" className="space-y-4">
+          <AccountsTable
+            accounts={accounts}
+            onAccountUpdated={handleAccountUpdated}
+          />
+        </TabsContent>
+
+        <TabsContent value="grid" className="space-y-4">
+          <AccountsGrid
+            accounts={accounts}
+            onAccountUpdated={handleAccountUpdated}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {/* Pagination */}
+      {!loading && totalItems > 0 && (
+        <Pagination className="mt-4">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious 
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPage > 1) setCurrentPage(currentPage - 1);
+                }}
+                aria-disabled={currentPage === 1}
+                className={currentPage === 1 ? "pointer-events-none opacity-50" : ""}
+              />
+            </PaginationItem>
+            
+            <PaginationItem>
+              <span className="px-4 text-sm text-muted-foreground">
+                Page {currentPage} of {Math.ceil(totalItems / limit)}
+              </span>
+            </PaginationItem>
+
+            <PaginationItem>
+              <PaginationNext 
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPage < Math.ceil(totalItems / limit)) setCurrentPage(currentPage + 1);
+                }}
+                aria-disabled={currentPage >= Math.ceil(totalItems / limit)}
+                className={currentPage >= Math.ceil(totalItems / limit) ? "pointer-events-none opacity-50" : ""}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
       )}
 
       {/* Dialogs */}
@@ -517,7 +508,7 @@ export default function AccountsClient({
           setBulkActionsOpen(open);
           // If dialog is closed after successful action, refresh accounts
           if (!open && selectedAccounts.length > 0) {
-            loadAccounts();
+            refreshAccounts();
             setSelectedAccounts([]);
           }
         }}
@@ -529,7 +520,7 @@ export default function AccountsClient({
         onOpenChange={(open) => {
           setImportDialogOpen(open);
           // If dialog is closed after successful import, refresh accounts
-          if (!open) loadAccounts();
+          if (!open) refreshAccounts();
         }}
       />
     </div>

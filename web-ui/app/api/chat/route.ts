@@ -32,8 +32,9 @@ export async function POST(req: Request) {
             model,
             mode = 'plan',
             stream = true,
-            accountId,      // AWS account ID for context
-            accountName     // AWS account name for display
+            accounts,       // Array of { accountId, accountName } for multi-account querying
+            accountId,      // Deprecated: single AWS account ID for backwards compatibility
+            accountName     // Deprecated: single AWS account name
         } = await req.json();
         const threadId = requestThreadId || Date.now().toString();
 
@@ -58,15 +59,16 @@ export async function POST(req: Request) {
         console.log(`   Auto-Approve: ${autoApprove}`);
         console.log(`   Model:        ${model || 'Default'}`);
         console.log(`   Mode:         ${mode}`);
-        console.log(`   AWS Account:  ${accountId ? `${accountName || accountId} (${accountId})` : 'None selected'}`);
+        console.log(`   AWS Accounts: ${accounts?.length || 0} selected${accounts?.length ? ` (${accounts.map((a: any) => a.accountId).join(', ')})` : ' (none)'}`);
         console.log(`   Timestamp:    ${new Date().toISOString()}`);
 
-        // Create graph with configuration
+        // Create graph with configuration - supports multi-account
         const graphConfig = {
             model: model || 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
             autoApprove: autoApprove,
-            accountId: accountId,       // Pass account context to graph
-            accountName: accountName    // Pass account name for display in prompts
+            accounts: accounts,         // Pass accounts array for multi-account querying
+            accountId: accountId,       // Backwards compatibility
+            accountName: accountName
         };
 
         const graph = mode === 'fast'
