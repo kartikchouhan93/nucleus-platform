@@ -731,7 +731,18 @@ export default function AccountDetailPage({ params }: AccountDetailPageProps) {
                       </div>
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center justify-between">
-                          <div className="font-medium">{activityItem.action}</div>
+                          <div className="font-medium">
+                            {activityItem.action === 'Schedule Execution' && activityItem.metadata?.scheduleId ? (
+                              <button
+                                onClick={() => router.push(`/schedules/${encodeURIComponent(activityItem.metadata.scheduleId)}/history/${encodeURIComponent(activityItem.id)}`)}
+                                className="hover:text-primary hover:underline focus:outline-none text-left"
+                              >
+                                {activityItem.action}
+                              </button>
+                            ) : (
+                              activityItem.action
+                            )}
+                          </div>
                           <span className="text-sm text-muted-foreground">
                             {new Date(activityItem.timestamp).toLocaleString()}
                           </span>
@@ -742,7 +753,9 @@ export default function AccountDetailPage({ params }: AccountDetailPageProps) {
                         {activityItem.resourceType && (
                           <div className="flex items-center space-x-2 text-xs text-muted-foreground">
                             <Server className="h-3 w-3" />
-                            <span>{activityItem.resourceType}: {activityItem.resourceName}</span>
+                            <span>
+                              {activityItem.resourceType}: {activityItem.resourceName}
+                            </span>
                           </div>
                         )}
                       </div>

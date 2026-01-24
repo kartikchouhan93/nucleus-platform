@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuditService } from '@/lib/audit-service';
+import { ScheduleExecutionService } from '@/lib/schedule-execution-service';
 
 // GET /api/accounts/[accountId]/activity - Get recent activity logs for this account
 export async function GET(
@@ -18,28 +19,28 @@ export async function GET(
 
         const decodedAccountId = decodeURIComponent(accountId);
 
-        // Fetch audit logs filtered by accountId or resource containing the accountId
-        // We'll search for schedule execution events and account-related actions
-        const { logs } = await AuditService.getAuditLogs({
-            limit: 50, // Get recent 50 activities
+        // Fetch audit logs
+        const auditPromise = AuditService.getAuditLogs({
+            limit: 100, // Increased limit to ensure we find relevant logs
         });
 
-        // Filter logs that are related to this account
+        // Fetch schedule executions
+        const executionsPromise = ScheduleExecutionService.getRecentExecutions({
+            limit: 100,
+        });
+
+        const [{ logs }, executions] = await Promise.all([auditPromise, executionsPromise]);
+
+        // Filter logs related to this account
         const accountLogs = logs.filter((log) => {
-            // Check if the accountId matches
             if (log.accountId === decodedAccountId) return true;
-
-            // Check if metadata contains the accountId
             if (log.metadata?.accountId === decodedAccountId) return true;
-
-            // Check if resource contains the accountId (for schedule-related logs)
             if (log.resourceId?.includes(decodedAccountId)) return true;
-
             return false;
         });
 
-        // Transform to activity format for the UI
-        const activity = accountLogs.map((log) => ({
+        // Transform audit logs to activity format
+        const logActivities = accountLogs.map((log) => ({
             id: log.id,
             timestamp: log.timestamp,
             action: log.action,
@@ -49,6 +50,39 @@ export async function GET(
             resourceName: log.resource,
             metadata: log.metadata,
         }));
+
+        // Filter executions related to this account
+        const accountExecutions = executions.filter(
+            (exec) => exec.accountId === decodedAccountId
+        );
+
+        // Transform executions to activity format
+        const executionActivities = accountExecutions.map((exec) => {
+            const resourceCount =
+                (exec.resourcesStarted || 0) +
+                (exec.resourcesStopped || 0) +
+                (exec.resourcesFailed || 0);
+
+            return {
+                id: exec.executionId,
+                timestamp: exec.executionTime,
+                action: 'Schedule Execution',
+                details: `Schedule execution finished. Actioned ${resourceCount} resources (${exec.resourcesFailed || 0} failed).`,
+                status: exec.status === 'success' ? 'success' : (exec.status === 'partial' || exec.status === 'failed' ? 'error' : 'info'),
+                resourceType: 'schedule',
+                resourceName: exec.scheduleId, // Ideally this would be the name, but ID is what we have on the record
+                metadata: {
+                    scheduleId: exec.scheduleId,
+                    duration: exec.duration,
+                    ...exec.schedule_metadata
+                },
+            };
+        });
+
+        // Merge and sort
+        const activity = [...logActivities, ...executionActivities].sort(
+            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
 
         return NextResponse.json({
             activity,
