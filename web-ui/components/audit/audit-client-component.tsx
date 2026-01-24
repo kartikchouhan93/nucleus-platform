@@ -17,6 +17,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectLabel,
 } from "@/components/ui/select";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,7 +26,6 @@ import {
   Activity,
   Download,
   RefreshCw,
-  Filter,
   Search,
   AlertTriangle,
   CheckCircle,
@@ -37,8 +38,7 @@ import {
 import { AuditLogsTable } from "@/components/audit/audit-logs-table";
 import { AuditLogsChart } from "@/components/audit/audit-logs-chart";
 import { ExportAuditDialog } from "@/components/audit/export-audit-dialog";
-import { AuditFilters } from "@/components/audit/audit-filters";
-import { addDays } from "date-fns";
+import { addDays, startOfDay } from "date-fns";
 import { AuditLog } from "@/lib/types";
 import { AuditLogFilters, ClientAuditService } from "@/lib/client-audit-service-api";
 import type { DateRange } from "react-day-picker";
@@ -48,6 +48,7 @@ interface AuditStats {
   errorCount: number;
   warningCount: number;
   successCount: number;
+  byEventType?: Record<string, number>;
 }
 
 interface AuditClientProps {
@@ -87,23 +88,22 @@ export default function AuditClient({
     // Parse date strings if provided in initialFilters
     if (initialFilters?.startDate || initialFilters?.endDate) {
       return {
-        from: initialFilters.startDate ? new Date(initialFilters.startDate) : addDays(new Date(), -7),
+        from: initialFilters.startDate ? new Date(initialFilters.startDate) : new Date(),
         to: initialFilters.endDate ? new Date(initialFilters.endDate) : new Date(),
       };
     }
+    // Default to today
     return {
-      from: addDays(new Date(), -7),
+      from: startOfDay(new Date()),
       to: new Date(),
     };
   });
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   
   // Pagination State
   const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
   const [currentToken, setCurrentToken] = useState<string | undefined>(undefined);
-  const [pageHistory, setPageHistory] = useState<string[]>([]);
-  const [advancedFilters, setAdvancedFilters] = useState<any>({});
+  const [pageHistory, setPageHistory] = useState<(string | undefined)[]>([]);
 
   
   // Debounced search term setter
@@ -135,15 +135,18 @@ export default function AuditClient({
       updateUrlWithFilters();
 
       // Build filters
-      const filters: AuditLogFilters = {
-        ...advancedFilters // Merge advanced filters
-      };
+      const filters: AuditLogFilters = {};
       
       if (selectedEventType !== "all") filters.eventType = selectedEventType;
       if (selectedStatus !== "all") filters.status = selectedStatus;
       if (selectedUser !== "all") filters.user = selectedUser;
       if (dateRange?.from) filters.startDate = dateRange.from.toISOString();
-      if (dateRange?.to) filters.endDate = dateRange.to.toISOString();
+      if (dateRange?.to) {
+        // Ensure end date covers the full day
+        const endDate = new Date(dateRange.to);
+        endDate.setHours(23, 59, 59, 999);
+        filters.endDate = endDate.toISOString();
+      }
       
       if (pageToken) {
         filters.nextPageToken = pageToken;
@@ -164,6 +167,7 @@ export default function AuditClient({
         errorCount: stats.errorCount || 0,
         warningCount: stats.warningCount || 0,
         successCount: stats.successCount || 0,
+        byEventType: stats.byEventType || {},
       });
     } catch (err) {
       console.error("Error fetching audit data:", err);
@@ -171,13 +175,13 @@ export default function AuditClient({
     } finally {
       setLoading(false);
     }
-  }, [selectedEventType, selectedStatus, selectedUser, dateRange, updateUrlWithFilters, advancedFilters]);
+  }, [selectedEventType, selectedStatus, selectedUser, dateRange, updateUrlWithFilters]);
 
   // Track if this is the first render
   const isFirstRender = useIsFirstRender();
 
-  // Update URL when filters change
-  useEffect(() => {
+  // Apply filters handler - called explicitly via Apply button
+  const handleApplyFilters = () => {
     // Build URL with current filters
     const url = new URL(window.location.href);
     
@@ -215,14 +219,12 @@ export default function AuditClient({
     // Update URL without page reload
     window.history.pushState({}, '', url.toString());
     
-    // Fetch fresh data when filters change (skip on initial render)
-    if (!isFirstRender) {
-      setPageHistory([]); // Reset history on filter change
-      setNextPageToken(undefined);
-      setCurrentToken(undefined);
-      fetchAuditData();
-    }
-  }, [selectedEventType, selectedStatus, selectedUser, dateRange, advancedFilters, fetchAuditData, isFirstRender]);
+    // Reset pagination and fetch data
+    setPageHistory([]);
+    setNextPageToken(undefined);
+    setCurrentToken(undefined);
+    fetchAuditData();
+  };
   
   // Filter logs based on search term (client-side for performance)
   useEffect(() => {
@@ -257,14 +259,14 @@ export default function AuditClient({
     setSelectedStatus("all");
     setSelectedUser("all");
     setDateRange({
-      from: addDays(new Date(), -7),
+      from: startOfDay(new Date()),
       to: new Date(),
     });
-    setAdvancedFilters({}); // Clear advanced filters
-    setAdvancedFilters({}); // Clear advanced filters
     setPageHistory([]);
     setNextPageToken(undefined);
     setCurrentToken(undefined);
+    // Trigger data fetch after clearing filters
+    setTimeout(() => fetchAuditData(), 0);
   };
 
   const handleDateRangeChange = (range: DateRange | undefined) => {
@@ -272,16 +274,34 @@ export default function AuditClient({
   };
 
   // Get unique values for filter dropdowns with proper formatting
-  const uniqueEventTypes = Array.from(
-    new Set(auditLogs.map((log) => log.eventType))
-  ).map((eventType) => ({
-    value: eventType,
-    label: eventType
-      .split(".")
-      .map((part) => part.replace(/_/g, " "))
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" → "),
-  }));
+  // Use stats.byEventType to get all available event types, not just from current page
+  const uniqueEventTypes = stats.byEventType 
+    ? Object.keys(stats.byEventType).map((eventType) => {
+        let category = "User Events";
+        if (eventType.startsWith("scheduler") || eventType.startsWith("system")) {
+          category = "System Events";
+        } else if (eventType.startsWith("web-ui") || eventType === "auth.login") {
+          category = "Web UI Events";
+        }
+        
+        return {
+          value: eventType,
+          label: eventType
+            .split(".")
+            .map((part) => part.replace(/_/g, " "))
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" → "),
+          category
+        };
+      })
+    : [];
+
+  // Group event types
+  const groupedEventTypes = {
+    "System Events": uniqueEventTypes.filter(t => t.category === "System Events"),
+    "User Events": uniqueEventTypes.filter(t => t.category === "User Events"),
+    "Web UI Events": uniqueEventTypes.filter(t => t.category === "Web UI Events"),
+  };
 
   const uniqueUsers = Array.from(new Set(auditLogs.map((log) => log.user)));
 
@@ -304,11 +324,7 @@ export default function AuditClient({
     return value;
   };
 
-  const handleAdvancedFiltersChange = (filters: any) => {
-    console.log("Advanced filters changed:", filters);
-    setAdvancedFilters(filters);
-    // Effects will trigger fetch
-  };
+
 
   const handleNextPage = () => {
     if (nextPageToken) {
@@ -469,19 +485,6 @@ export default function AuditClient({
                 Filter and search through audit log entries
               </CardDescription>
             </div>
-            <div className="flex items-center space-x-2">
-              <Button variant="outline" size="sm" onClick={clearFilters}>
-                Clear All
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              >
-                <Filter className="mr-2 h-4 w-4" />
-                {showAdvancedFilters ? "Hide" : "Show"} Advanced
-              </Button>
-            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -519,14 +522,48 @@ export default function AuditClient({
               </SelectTrigger>
               <SelectContent className="max-w-[400px]">
                 <SelectItem value="all">All Events</SelectItem>
-                {uniqueEventTypes.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
-                    <div className="flex items-center space-x-2 max-w-[350px]">
-                      <Activity className="h-4 w-4 flex-shrink-0" />
-                      <span className="truncate">{type.label}</span>
-                    </div>
-                  </SelectItem>
-                ))}
+                
+                {groupedEventTypes["System Events"].length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel>System Events</SelectLabel>
+                    {groupedEventTypes["System Events"].map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        <div className="flex items-center space-x-2 max-w-[350px]">
+                          <Server className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">{type.label}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
+
+                {groupedEventTypes["User Events"].length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel>User Events</SelectLabel>
+                    {groupedEventTypes["User Events"].map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        <div className="flex items-center space-x-2 max-w-[350px]">
+                          <User className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">{type.label}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
+
+                {groupedEventTypes["Web UI Events"].length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel>Web UI Events</SelectLabel>
+                    {groupedEventTypes["Web UI Events"].map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        <div className="flex items-center space-x-2 max-w-[350px]">
+                          <Activity className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">{type.label}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
               </SelectContent>
             </Select>
 
@@ -595,12 +632,15 @@ export default function AuditClient({
                 ))}
               </SelectContent>
             </Select>
+            
+            {/* Filter Action Buttons */}
+            <Button variant="outline" onClick={clearFilters} disabled={loading}>
+              Reset Filters
+            </Button>
+            <Button onClick={handleApplyFilters} disabled={loading}>
+              Apply Filters
+            </Button>
           </div>
-
-          {/* Advanced Filters */}
-          {showAdvancedFilters && (
-              <AuditFilters onFiltersChange={handleAdvancedFiltersChange} />
-          )}
         </CardContent>
       </Card>
 

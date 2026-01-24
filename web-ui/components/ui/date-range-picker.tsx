@@ -15,6 +15,21 @@ interface DatePickerWithRangeProps {
 }
 
 export function DatePickerWithRange({ date, onDateChange, className }: DatePickerWithRangeProps) {
+  // Handle date selection with 7-day max range enforcement
+  const handleDateSelect = (range: DateRange | undefined) => {
+    if (range?.from && range?.to) {
+      const diffDays = Math.ceil((range.to.getTime() - range.from.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays > 7) {
+        // Auto-adjust to 7 days max from start date
+        range.to = new Date(range.from.getTime() + 6 * 24 * 60 * 60 * 1000);
+      }
+    }
+    onDateChange(range);
+  };
+
+  // Disable future dates
+  const disabledDays = { after: new Date() };
+
   return (
     <div className={cn("grid gap-2", className)}>
       <Popover>
@@ -42,11 +57,16 @@ export function DatePickerWithRange({ date, onDateChange, className }: DatePicke
           <Calendar
             initialFocus
             mode="range"
-            defaultMonth={date?.from}
+            defaultMonth={date?.from || new Date()}
             selected={date}
-            onSelect={onDateChange}
-            numberOfMonths={2}
+            onSelect={handleDateSelect}
+            numberOfMonths={1}
+            disabled={disabledDays}
+            toDate={new Date()}
           />
+          <div className="p-2 text-xs text-muted-foreground border-t">
+            Max 7 days range
+          </div>
         </PopoverContent>
       </Popover>
     </div>

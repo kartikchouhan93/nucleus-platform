@@ -24,21 +24,21 @@ export function MarkdownContent({ content, className }: MarkdownContentProps) {
         components={{
           // Headings
           h1: ({ children }) => (
-            <h1 className="text-xl font-bold mt-4 mb-2 first:mt-0">{children}</h1>
+            <h1 className="text-lg font-bold mt-3 mb-1.5 first:mt-0">{children}</h1>
           ),
           h2: ({ children }) => (
-            <h2 className="text-lg font-bold mt-3 mb-2 first:mt-0">{children}</h2>
+            <h2 className="text-base font-bold mt-2.5 mb-1.5 first:mt-0">{children}</h2>
           ),
           h3: ({ children }) => (
-            <h3 className="text-base font-semibold mt-2 mb-1 first:mt-0">{children}</h3>
+            <h3 className="text-sm font-semibold mt-2 mb-1 first:mt-0">{children}</h3>
           ),
           h4: ({ children }) => (
-            <h4 className="text-sm font-semibold mt-2 mb-1 first:mt-0">{children}</h4>
+            <h4 className="text-[13px] font-semibold mt-1.5 mb-1 first:mt-0">{children}</h4>
           ),
           
           // Paragraphs
           p: ({ children }) => (
-            <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>
+            <p className="mb-1.5 last:mb-0 leading-relaxed text-[13px]">{children}</p>
           ),
           
           // Bold and italic
@@ -63,13 +63,13 @@ export function MarkdownContent({ content, className }: MarkdownContentProps) {
           
           // Lists
           ul: ({ children }) => (
-            <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>
+            <ul className="list-disc list-inside mb-1.5 space-y-0.5 text-[13px]">{children}</ul>
           ),
           ol: ({ children }) => (
-            <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>
+            <ol className="list-decimal list-inside mb-1.5 space-y-0.5 text-[13px]">{children}</ol>
           ),
           li: ({ children }) => (
-            <li className="leading-relaxed">{children}</li>
+            <li className="leading-relaxed text-[13px]">{children}</li>
           ),
           
           // Code

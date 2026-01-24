@@ -37,10 +37,11 @@ import { AuditLog } from "@/lib/types";
 
 interface AuditLogsTableProps {
   logs: AuditLog[];
+  onFilter?: (filters: any) => void;
 }
 
-export function AuditLogsTable({ logs }: AuditLogsTableProps) {
-  const [viewingLog, setViewingLog] = useState(null);
+export function AuditLogsTable({ logs, onFilter }: AuditLogsTableProps) {
+  const [viewingLog, setViewingLog] = useState<AuditLog | null>(null);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -195,9 +196,11 @@ export function AuditLogsTable({ logs }: AuditLogsTableProps) {
                   </TableCell>
                   <TableCell>
                     <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <Activity className="h-3 w-3" />
-                        <span className="text-sm font-medium">
+                      <div className="text-sm font-medium">
+                        <span 
+                          className="cursor-pointer hover:underline text-primary"
+                          onClick={() => setViewingLog(log)}
+                        >
                           {log.action}
                         </span>
                       </div>
@@ -277,7 +280,7 @@ export function AuditLogsTable({ logs }: AuditLogsTableProps) {
                         {log.correlationId && (
                           <DropdownMenuItem
                             onClick={() =>
-                              viewCorrelatedEvents(log.correlationId)
+                              viewCorrelatedEvents(log.correlationId!)
                             }
                           >
                             <ExternalLink className="mr-2 h-4 w-4" />

@@ -45,10 +45,10 @@ import { UIAccount } from '@/lib/types';
 
 // Available models
 const AVAILABLE_MODELS = [
-  { id: 'global.amazon.nova-2-lite-v1:0', label: 'Nova 2 Lite (Global)', provider: 'amazon' },
   { id: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', label: 'Claude 4.5 Haiku (Global)', provider: 'amazon' },
-  { id: 'global.anthropic.claude-opus-4-5-20251101-v1:0', label: 'Claude 4.5 Opus (Global)', provider: 'amazon' },
+  { id: 'global.amazon.nova-2-lite-v1:0', label: 'Nova 2 Lite (Global)', provider: 'amazon' },
   { id: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0', label: 'Claude 4.5 Sonnet (Global)', provider: 'amazon' },
+  { id: 'global.anthropic.claude-opus-4-5-20251101-v1:0', label: 'Claude 4.5 Opus (Global)', provider: 'amazon' },
 ];
 
 // Phase types matching backend
@@ -595,7 +595,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
   ];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-theme(spacing.16))] md:h-[calc(100vh-6rem)] max-w-4xl mx-auto w-full border rounded-xl overflow-hidden shadow-lg bg-background">
+    <div className="flex flex-col h-full max-w-[95%] mx-auto w-full border rounded-xl overflow-hidden shadow-lg bg-background">
       {/* Header */}
       <div className="p-4 border-b bg-gradient-to-r from-primary/10 to-primary/5 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -787,7 +787,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
 
                 {/* Message Content */}
                 <div className={cn(
-                  "max-w-[85%] rounded-lg p-3 text-sm",
+                  "max-w-[85%] rounded-lg p-2.5 text-[13px]",
                   isUser 
                     ? "bg-primary text-primary-foreground ml-auto" 
                     : "bg-muted/50 border"
@@ -871,7 +871,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
       </ScrollArea>
 
       {/* Input Area - Unified Card Design */}
-      <div className="p-4 bg-background border-t">
+      <div className="p-2 bg-background border-t">
         <form onSubmit={handleFormSubmit} className="border rounded-xl shadow-sm bg-card overflow-hidden focus-within:ring-1 focus-within:ring-ring transition-all">
           
           {/* Header: Model Selection & AWS Account & Settings */}

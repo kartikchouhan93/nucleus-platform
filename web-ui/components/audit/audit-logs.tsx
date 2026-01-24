@@ -19,7 +19,6 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { AuditLog } from "@/lib/types";
-import { AuditService } from "@/lib/client-audit-service";
 import { formatDateTime } from "@/lib/date-utils";
 
 export function AuditLogs({
