@@ -459,6 +459,7 @@ export class ComputeStack extends cdk.Stack {
                 'cognito-idp:AdminGetUser', 'cognito-idp:AdminSetUserPassword', 'cognito-idp:AdminCreateUser',
                 'cognito-idp:AdminDeleteUser', 'cognito-idp:AdminUpdateUserAttributes', 'cognito-idp:AdminListUsers',
                 'cognito-idp:AdminListGroups', 'cognito-idp:AdminAddUserToGroup', 'cognito-idp:AdminRemoveUserFromGroup',
+                'cognito-idp:ListUsers'
             ],
             resources: [this.userPool.userPoolArn],
         }));

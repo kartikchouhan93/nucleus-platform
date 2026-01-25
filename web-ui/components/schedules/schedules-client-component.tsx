@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Card,
@@ -70,11 +70,16 @@ export default function SchedulesClient({
   const [error, setError] = useState<string | null>(null);
 
   // UI state
+  // UI state
   const [searchTerm, setSearchTerm] = useState(initialFilters?.searchTerm || "");
   const [statusFilter, setStatusFilter] = useState(initialFilters?.statusFilter || "all");
   const [resourceFilter, setResourceFilter] = useState(initialFilters?.resourceFilter || "all");
-  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
   const [selectedSchedules, setSelectedSchedules] = useState<string[]>([]);
+  
+  // Stats state
+  const [allSchedules, setAllSchedules] = useState<UISchedule[]>([]);
+  const [loadingStats, setLoadingStats] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
@@ -93,7 +98,7 @@ export default function SchedulesClient({
       };
       
       const result = await ClientScheduleService.getSchedules(filters);
-      setSchedules(result);
+      setSchedules(result.schedules);
       
     } catch (err) {
       console.error("Error loading schedules:", err);
@@ -102,6 +107,25 @@ export default function SchedulesClient({
       setLoading(false);
     }
   }, [statusFilter, resourceFilter, searchTerm]);
+
+  // Load global stats (all schedules)
+  const loadStats = useCallback(async () => {
+    try {
+      setLoadingStats(true);
+      // Fetch all schedules for stats (no limit)
+      const result = await ClientScheduleService.getSchedules({ limit: 1000 });
+      setAllSchedules(result.schedules);
+    } catch (err) {
+      console.error("Error loading stats:", err);
+    } finally {
+        setLoadingStats(false);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+     loadStats();
+  }, [loadStats]);
 
   // Refresh schedules (load with current filters)
   const refreshSchedules = () => {
@@ -123,7 +147,7 @@ export default function SchedulesClient({
             setLoading(true);
             setError(null);
             const result = await ClientScheduleService.getSchedules();
-            setSchedules(result);
+            setSchedules(result.schedules);
         } catch (err) {
             console.error("Error loading schedules:", err);
             setError(err instanceof Error ? err.message : "Failed to load schedules");
@@ -153,12 +177,12 @@ export default function SchedulesClient({
     router.push("/schedules/create");
   };
 
-  // Calculate summary statistics
+  // Calculate summary statistics from ALL schedules, not just current page
   const stats = {
-    total: schedules.length,
-    active: schedules.filter((s) => s.active).length,
-    inactive: schedules.filter((s) => !s.active).length,
-    totalSavings: schedules.reduce(
+    total: allSchedules.length,
+    active: allSchedules.filter((s) => s.active).length,
+    inactive: allSchedules.filter((s) => !s.active).length,
+    totalSavings: allSchedules.reduce(
       (sum, s) => sum + (s.estimatedSavings || 0),
       0
     ),
@@ -167,6 +191,7 @@ export default function SchedulesClient({
   // Handle schedule updates - this will be called by child components
   const handleScheduleUpdated = (message?: string) => {
     loadSchedulesWithFilters();
+    loadStats(); // Refresh stats too
     if (message) {
       toast({
         variant: "success",

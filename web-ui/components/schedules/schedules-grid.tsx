@@ -158,7 +158,8 @@ export function SchedulesGrid({
         {schedules.map((schedule) => (
           <Card
             key={schedule.id}
-            className="relative hover:shadow-md transition-shadow"
+            className="relative hover:shadow-md transition-shadow cursor-pointer"
+            onClick={() => router.push(`/schedules/${encodeURIComponent(schedule.id)}`)}
           >
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
@@ -168,12 +169,13 @@ export function SchedulesGrid({
                     onCheckedChange={(checked) =>
                       onSelectSchedule(schedule.id, checked as boolean)
                     }
+                    onClick={(e) => e.stopPropagation()}
                     aria-label={`Select ${schedule.name}`}
                   />
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="h-8 w-8 p-0">
+                    <Button variant="ghost" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -352,7 +354,10 @@ export function SchedulesGrid({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => toggleScheduleStatus(schedule)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleScheduleStatus(schedule);
+                      }}
                       disabled={loadingActions === schedule.id}
                       className="h-8 px-2 text-xs"
                     >

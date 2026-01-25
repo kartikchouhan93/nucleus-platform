@@ -100,8 +100,12 @@ export default function AccountsClient({
   const [localStatusFilter, setLocalStatusFilter] = useState(initialFilters?.statusFilter || "all");
   const [localConnectionFilter, setLocalConnectionFilter] = useState(initialFilters?.connectionFilter || "all");
 
-  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  
+  // Stats state
+  const [allAccounts, setAllAccounts] = useState<UIAccount[]>([]);
+  const [loadingStats, setLoadingStats] = useState(false);
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
@@ -155,9 +159,29 @@ export default function AccountsClient({
     }
   }, [statusFilter, connectionFilter, searchTerm, currentPage, limit, updateUrlWithFilters]);
 
+  // Load global stats (all accounts)
+  const loadStats = useCallback(async () => {
+    try {
+      setLoadingStats(true);
+      // Fetch all accounts for stats (no limit, or high limit)
+      const result = await ClientAccountService.getAccounts({ limit: 1000 });
+      setAllAccounts(result.accounts);
+    } catch (err) {
+      console.error("Error loading stats:", err);
+    } finally {
+        setLoadingStats(false);
+    }
+  }, []);
+
+  // Initial load for stats
+  useEffect(() => {
+     loadStats();
+  }, [loadStats]);
+
   // Handle account updates
   const handleAccountUpdated = (message?: string) => {
     loadAccountsWithFilters();
+    loadStats(); // Refresh stats
     if (message) {
       toast({
         variant: "success",
@@ -217,15 +241,15 @@ export default function AccountsClient({
 
   // Calculate summary statistics
   const stats = {
-    total: totalItems,
-    active: accounts.filter((a) => a.active).length, // Note: only for current page
-    inactive: accounts.filter((a) => !a.active).length, // Note: only for current page
-    connected: accounts.filter((a) => a.connectionStatus === 'connected').length, // Note: only for current page
-    totalSavings: accounts.reduce(
+    total: allAccounts.length, // totalItems might correspond to filtered total, but for "Total Accounts" card we likely want absolute total or filtered total. Let's use allAccounts.length effectively (assuming no filters on loadStats)
+    active: allAccounts.filter((a) => a.active).length,
+    inactive: allAccounts.filter((a) => !a.active).length,
+    connected: allAccounts.filter((a) => a.connectionStatus === 'connected').length,
+    totalSavings: allAccounts.reduce(
       (sum, a) => sum + (a.monthlySavings || 0),
       0
     ),
-    totalResources: accounts.reduce(
+    totalResources: allAccounts.reduce(
       (sum, a) => sum + (a.resourceCount || 0),
       0
     ),
@@ -302,7 +326,7 @@ export default function AccountsClient({
           <CardContent>
             <div className="text-2xl font-bold">{stats.total}</div>
             <p className="text-xs text-muted-foreground">
-              {stats.active} active (page)
+              {stats.active} active
             </p>
           </CardContent>
         </Card>
@@ -315,7 +339,7 @@ export default function AccountsClient({
           <CardContent>
             <div className="text-2xl font-bold">{stats.connected}</div>
              <p className="text-xs text-muted-foreground">
-              on current page
+              active
             </p>
           </CardContent>
         </Card>

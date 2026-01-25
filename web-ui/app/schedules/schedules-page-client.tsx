@@ -103,8 +103,15 @@ export function SchedulesPageClient({
   const [localStatusFilter, setLocalStatusFilter] = useState(initialFilters?.statusFilter || "all");
   const [localResourceFilter, setLocalResourceFilter] = useState(initialFilters?.resourceFilter || "all");
 
-  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+
+
+  const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
   const [selectedSchedules, setSelectedSchedules] = useState<string[]>([]);
+  
+  // Stats state
+  const [allSchedules, setAllSchedules] = useState<UISchedule[]>([]);
+  const [loadingStats, setLoadingStats] = useState(false);
+  
   const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   
@@ -151,9 +158,29 @@ export function SchedulesPageClient({
     }
   }, [statusFilter, resourceFilter, searchTerm, currentPage, limit, updateUrlWithFilters]);
 
+  // Load global stats (all schedules)
+  const loadStats = useCallback(async () => {
+    try {
+      setLoadingStats(true);
+      // Fetch all schedules for stats (no limit)
+      const result = await ClientScheduleService.getSchedules({ limit: 1000 });
+      setAllSchedules(result.schedules);
+    } catch (err) {
+      console.error("Error loading stats:", err);
+    } finally {
+        setLoadingStats(false);
+    }
+  }, []);
+  
+  // Initial load for stats
+  useEffect(() => {
+     loadStats();
+  }, [loadStats]);
+
   // Handle schedule updates - this will refresh schedules with current filters
   const handleScheduleUpdated = (message?: string) => {
     loadSchedulesWithFilters();
+    loadStats(); // Refresh stats too
     if (message) {
       toast({
         variant: "success" as any,
@@ -259,7 +286,9 @@ export function SchedulesPageClient({
         </div>
       </div>
 
-      {/* Server-rendered Summary Stats */}
+
+
+      {/* Calculated Summary Stats from Global Data */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -269,9 +298,9 @@ export function SchedulesPageClient({
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats?.total}</div>
+            <div className="text-2xl font-bold">{allSchedules.length}</div>
             <p className="text-xs text-muted-foreground">
-              {stats?.active} active, {stats?.inactive} inactive
+              {allSchedules.filter(s => s.active).length} active, {allSchedules.filter(s => !s.active).length} inactive
             </p>
           </CardContent>
         </Card>
@@ -286,10 +315,10 @@ export function SchedulesPageClient({
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats?.active || 0}</div>
+            <div className="text-2xl font-bold">{allSchedules.filter(s => s.active).length}</div>
             <p className="text-xs text-muted-foreground">
-              {stats && stats.total > 0 && stats.active !== undefined
-                ? ((stats.active / stats.total) * 100).toFixed(1)
+              {allSchedules.length > 0
+                ? ((allSchedules.filter(s => s.active).length / allSchedules.length) * 100).toFixed(1)
                 : 0}
               % success rate
             </p>
@@ -305,7 +334,7 @@ export function SchedulesPageClient({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              ${stats?.totalSavings?.toLocaleString()}
+              ${allSchedules.reduce((sum, s) => sum + (s.estimatedSavings || 0), 0).toLocaleString()}
             </div>
             <p className="text-xs text-muted-foreground">
               across all schedules
@@ -315,13 +344,13 @@ export function SchedulesPageClient({
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Schedules</CardTitle>
+            <CardTitle className="text-sm font-medium">Filtered</CardTitle>
             <Filter className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats?.total}</div>
+            <div className="text-2xl font-bold">{totalItems}</div>
             <p className="text-xs text-muted-foreground">
-              server-side rendered
+              schedules match filters
             </p>
           </CardContent>
         </Card>

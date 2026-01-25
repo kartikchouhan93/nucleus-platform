@@ -207,7 +207,8 @@ export function AccountsGrid({
           return (
             <Card
               key={account.id}
-              className="relative hover:shadow-md transition-shadow"
+              className="relative hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => router.push(`/accounts/${account.id}`)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
@@ -231,6 +232,7 @@ export function AccountsGrid({
                         variant="ghost"
                         className="h-8 w-8 p-0"
                         disabled={loadingActions === account.id}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         {loadingActions === account.id ? (
                           <RefreshCw className="h-4 w-4 animate-spin" />
@@ -337,7 +339,10 @@ export function AccountsGrid({
                     variant="outline"
                     size="sm"
                     className="flex-1 h-8 text-xs"
-                    onClick={() => validateConnection(account.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      validateConnection(account.id);
+                    }}
                     disabled={loadingActions === account.id}
                   >
                     {loadingActions === account.id ? (
@@ -351,7 +356,10 @@ export function AccountsGrid({
                     variant="outline"
                     size="sm"
                     className="flex-1 h-8 text-xs"
-                    onClick={() => toggleAccountStatus(account)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleAccountStatus(account);
+                    }}
                     disabled={loadingActions === account.id}
                   >
                     {loadingActions === account.id ? (
