@@ -247,6 +247,7 @@ export class ComputeStack extends cdk.Stack {
             runtime: lambda.Runtime.NODEJS_20_X,
             handler: 'dist/index.handler',
             code: lambda.Code.fromAsset('lambda/scheduler'),
+            architecture: lambda.Architecture.ARM_64,
             environment: {
                 APP_TABLE_NAME: appTable.tableName,
                 AUDIT_TABLE_NAME: auditTable.tableName,
@@ -494,14 +495,14 @@ export class ComputeStack extends cdk.Stack {
             cpu: webUiCpu,
             memoryLimitMiB: webUiMemory,
             runtimePlatform: {
-                cpuArchitecture: ecs.CpuArchitecture.X86_64,
+                cpuArchitecture: ecs.CpuArchitecture.ARM64,
                 operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
             },
         });
 
         const containerImage = ecs.ContainerImage.fromAsset(
             path.join(__dirname, "../web-ui"),
-            { file: "Dockerfile.ecs", platform: ecr_assets.Platform.LINUX_AMD64 }
+            { file: "Dockerfile.ecs", platform: ecr_assets.Platform.LINUX_ARM64 }
         );
 
         taskDef.addContainer('WebUIContainer', {

@@ -93,10 +93,10 @@ bun test src/services/dynamodb-service.test.ts
 The Dockerfile uses official Bun image with AWS Lambda Web Adapter:
 
 ```bash
-docker build --platform linux/amd64 -t scheduler-bun:latest .
+docker build --platform linux/arm64 -t scheduler-bun:latest .
 ```
 
-**Note**: Use `--platform linux/amd64` for compatibility with AWS Lambda (especially on Apple Silicon Macs).
+**Note**: Use `--platform linux/arm64` for AWS Lambda with ARM64/Graviton2 processors (better price-performance). If you need x86_64, use `--platform linux/amd64`.
 
 ### Test Docker Image Locally
 
@@ -303,10 +303,12 @@ Based on internal testing:
 
 | Metric | Node.js 20 | Bun 1.0 | Improvement |
 |--------|-----------|---------|-------------|
-| Cold Start | ~2.5s | ~0.9s | **64% faster** |
-| Warm Execution | ~1.2s | ~0.7s | **42% faster** |
-| Bundle Size | 45 MB | 32 MB | **29% smaller** |
-| Memory Usage | 180 MB | 145 MB | **19% less** |
+| **Cold Start** | ~2.5s | ~0.9s | **64% faster** ⚡ |
+| **Warm Execution** | ~1.2s | ~0.7s | **42% faster** ⚡ |
+| **Bundle Size** | 45 MB | 32 MB | **29% smaller** 📦 |
+| **Memory Usage** | 180 MB | 145 MB | **19% less** 💾 |
+
+**Additional Note**: Running on ARM64 (Graviton2) provides ~20% better price-performance compared to x86_64.
 
 ## 📝 Development Notes
 

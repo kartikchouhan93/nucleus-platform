@@ -69,7 +69,7 @@ bun run build
 ### 6. Build Docker Image
 
 ```bash
-docker build --platform linux/amd64 -t scheduler-bun:latest .
+docker build --platform linux/arm64 -t scheduler-bun:latest .
 ```
 
 ## Benefits Realized
