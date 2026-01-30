@@ -2,6 +2,7 @@ import * as cdk from "aws-cdk-lib";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as lambda_nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
@@ -260,12 +261,18 @@ export class ComputeStack extends cdk.Stack {
             resources: [snsTopic.topicArn],
         }));
 
-        const lambdaFunction = new lambda.Function(this, `${appName}-SchedulerLambda`, {
+        // Lambda function with Node.js runtime and automatic TypeScript bundling
+        const lambdaFunction = new lambda_nodejs.NodejsFunction(this, `${appName}-SchedulerLambda`, {
             functionName: `${stackName}-function`,
             runtime: lambda.Runtime.NODEJS_20_X,
-            handler: 'dist/index.handler',
-            code: lambda.Code.fromAsset('lambda/scheduler'),
             architecture: lambda.Architecture.ARM_64,
+            entry: path.join(__dirname, '../lambda/scheduler/src/index.ts'),
+            handler: 'handler',
+            bundling: {
+                externalModules: ['@aws-sdk/*'],
+                minify: true,
+                sourceMap: false,
+            },
             environment: {
                 APP_TABLE_NAME: appTable.tableName,
                 AUDIT_TABLE_NAME: auditTable.tableName,

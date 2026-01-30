@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
-import { ArrowLeft, Clock, RefreshCw, Save, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
+import { ArrowLeft, Clock, RefreshCw, Save, AlertCircle, CheckCircle2, Loader2, Play } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 interface SchedulerSettings {
@@ -33,6 +33,7 @@ export default function SchedulerSettingsPage() {
   const [settings, setSettings] = useState<SchedulerSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [executing, setExecuting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedInterval, setSelectedInterval] = useState<string>("30")
   const [hasChanges, setHasChanges] = useState(false)
@@ -108,6 +109,40 @@ export default function SchedulerSettingsPage() {
     }
   }
 
+  // Execute full scan now
+  const handleExecuteNow = async () => {
+    try {
+      setExecuting(true)
+      setError(null)
+      
+      const response = await fetch("/api/scheduler/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      })
+      
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to execute full scan")
+      }
+      
+      toast({
+        title: "Full Scan Triggered",
+        description: "Execution has started in the background. It may take a few minutes to complete.",
+      })
+    } catch (err) {
+      console.error("Error executing full scan:", err)
+      setError(err instanceof Error ? err.message : "Failed to execute full scan")
+      toast({
+        variant: "destructive",
+        title: "Execution Failed",
+        description: err instanceof Error ? err.message : "Failed to execute full scan",
+      })
+    } finally {
+      setExecuting(false)
+    }
+  }
+
   const getIntervalDescription = (interval: string) => {
     return intervalOptions.find(opt => opt.value === interval)?.description || ""
   }
@@ -139,10 +174,29 @@ export default function SchedulerSettingsPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" onClick={fetchSettings} disabled={loading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="default" 
+            onClick={handleExecuteNow} 
+            disabled={executing || loading}
+          >
+            {executing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Executing...
+              </>
+            ) : (
+              <>
+                <Play className="mr-2 h-4 w-4" />
+                Execute Now
+              </>
+            )}
+          </Button>
+          <Button variant="outline" onClick={fetchSettings} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Error Alert */}
