@@ -294,6 +294,27 @@ export async function processECSResource(
 
 
         } else if (action === 'start') {
+            const targetDesiredCount = lastDesiredCount && lastDesiredCount > 0 ? lastDesiredCount : 1;
+
+            // Optimization: If already at desired count, skip action
+            if (currentDesiredCount === targetDesiredCount) {
+                log.info(`ECS service ${serviceName} already at desiredCount=${targetDesiredCount}. Skipping start action.`);
+                return {
+                    arn: resource.arn,
+                    resourceId: resource.id,
+                    clusterArn,
+                    action: 'skip',
+                    status: 'success',
+                    last_state: {
+                        desiredCount: currentDesiredCount,
+                        runningCount,
+                        pendingCount,
+                        status: serviceStatus,
+                        asg_state: lastAsgState
+                    },
+                };
+            }
+
             // Check if we need to start (either ECS is 0, or backing ASG is 0 despite ECS being > 0)
             // We proceed with start logic (idempotent) to ensure ASGs are healthy
 
@@ -383,7 +404,6 @@ export async function processECSResource(
             }
 
             // Start the service by restoring desiredCount
-            const targetDesiredCount = lastDesiredCount && lastDesiredCount > 0 ? lastDesiredCount : 1;
 
             await ecsClient.send(new UpdateServiceCommand({
                 cluster: clusterArn,
