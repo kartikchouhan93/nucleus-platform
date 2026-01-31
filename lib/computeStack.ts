@@ -20,6 +20,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as path from "path";
 import * as crypto from "crypto";
 import { Construct } from "constructs";
+import { TableBucket, Namespace, Table, OpenTableFormat } from '@aws-cdk/aws-s3tables-alpha';
 import { RemovalPolicy } from "aws-cdk-lib";
 
 export interface ComputeStackProps extends cdk.StackProps {
@@ -122,9 +123,41 @@ export class ComputeStack extends cdk.Stack {
             sortKey: { name: 'gsi3sk', type: dynamodb.AttributeType.STRING },
         });
 
+        // 3. Nucleus Inventory Table (Auto-Discovery - Single Table Design)
+        const inventoryTableName = `${appName}-inventory-table`;
+        const inventoryTable = new dynamodb.Table(this, `${appName}-InventoryTable`, {
+            partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+            sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+            billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+            tableName: inventoryTableName,
+            timeToLiveAttribute: 'ttl',
+            removalPolicy: RemovalPolicy.DESTROY,
+        });
+
+        // GSIs for Inventory Table
+        // GSI1: Query by resource type (TYPE#RESOURCE -> {resourceType}#{timestamp})
+        inventoryTable.addGlobalSecondaryIndex({
+            indexName: 'GSI1',
+            partitionKey: { name: 'gsi1pk', type: dynamodb.AttributeType.STRING },
+            sortKey: { name: 'gsi1sk', type: dynamodb.AttributeType.STRING },
+        });
+        // GSI2: Query by region (REGION#{region} -> {resourceType}#{timestamp})
+        inventoryTable.addGlobalSecondaryIndex({
+            indexName: 'GSI2',
+            partitionKey: { name: 'gsi2pk', type: dynamodb.AttributeType.STRING },
+            sortKey: { name: 'gsi2sk', type: dynamodb.AttributeType.STRING },
+        });
+        // GSI3: Query by resource type across all accounts (RESOURCE_TYPE#{type} -> {accountId}#{resourceId})
+        inventoryTable.addGlobalSecondaryIndex({
+            indexName: 'GSI3',
+            partitionKey: { name: 'gsi3pk', type: dynamodb.AttributeType.STRING },
+            sortKey: { name: 'gsi3sk', type: dynamodb.AttributeType.STRING },
+        });
+
         // ============================================================================
         // DYNAMODB TABLES (from webUIStack.ts)
         // ============================================================================
+
 
         // Users Teams Table
         const usersTeamsTable = new dynamodb.Table(this, `${appName}-UsersTeamsTable`, {
@@ -204,6 +237,113 @@ export class ComputeStack extends cdk.Stack {
                 }
             ]
         });
+
+        // ============================================================================
+        // AUTO-DISCOVERY INFRASTRUCTURE
+        // ============================================================================
+
+        // S3 Bucket for inventory raw data and exports
+        const inventoryBucket = new s3.Bucket(this, `${appName}-InventoryBucket`, {
+            bucketName: `${appName}-inventory-${this.account}-${this.region}`,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+            autoDeleteObjects: true,
+            lifecycleRules: [
+                {
+                    expiration: cdk.Duration.days(365), // Keep raw inventory data for 1 year
+                    prefix: 'raw/',
+                },
+                {
+                    expiration: cdk.Duration.days(7), // Exports expire after 1 week
+                    prefix: 'exports/',
+                }
+            ]
+        });
+
+        // Discovery Task Log Group
+        const discoveryLogGroup = new logs.LogGroup(this, `${appName}-DiscoveryLogGroup`, {
+            logGroupName: `/ecs/${appName}-discovery`,
+            retention: logs.RetentionDays.TWO_WEEKS,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        // Discovery Task Role (for running the discovery container)
+        const discoveryTaskRole = new iam.Role(this, `${appName}-DiscoveryTaskRole`, {
+            roleName: `${appName}-discovery-task-role`,
+            assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+        });
+
+        // Cross-account assume role permissions for discovery
+        discoveryTaskRole.addToPolicy(new iam.PolicyStatement({
+            actions: ['sts:AssumeRole'],
+            resources: [
+                `arn:aws:iam::*:role/${CROSS_ACCOUNT_ROLE_NAME}`,
+                'arn:aws:iam::*:role/NucleusAccess-*'
+            ],
+        }));
+
+        // DynamoDB permissions for discovery
+        // App table: read accounts to scan
+        discoveryTaskRole.addToPolicy(new iam.PolicyStatement({
+            actions: ['dynamodb:GetItem', 'dynamodb:Query'],
+            resources: [appTable.tableArn, `${appTable.tableArn}/index/*`],
+        }));
+        // Inventory table: write discovered resources
+        discoveryTaskRole.addToPolicy(new iam.PolicyStatement({
+            actions: [
+                'dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:Scan',
+                'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:BatchWriteItem', 'dynamodb:DeleteItem',
+            ],
+            resources: [inventoryTable.tableArn, `${inventoryTable.tableArn}/index/*`],
+        }));
+
+
+        // S3 permissions for discovery
+        inventoryBucket.grantReadWrite(discoveryTaskRole);
+
+        // S3 Tables permissions (for managed Iceberg tables)
+        discoveryTaskRole.addToPolicy(new iam.PolicyStatement({
+            actions: ['s3tables:*'],
+            resources: ['*'], // Allow all s3tables actions for now as ARN construction is tricky with new service
+        }));
+
+        // ============================================================================
+        // S3 TABLES INFRASTRUCTURE (Iceberg)
+        // ============================================================================
+
+        // 1. Table Bucket
+        const tableBucket = new TableBucket(this, `${appName}-TableBucket`, {
+            tableBucketName: `${appName}-inventory-bucket`,
+        });
+
+        // 2. Namespace
+        const namespace = new Namespace(this, `${appName}-Namespace`, {
+            namespaceName: 'nucleus',
+            tableBucket: tableBucket,
+        });
+
+        // 3. Resource Inventory Table
+        const inventoryIcebergTable = new Table(this, `${appName}-InventoryIcebergTable`, {
+            tableName: 'resources',
+            namespace: namespace,
+            openTableFormat: OpenTableFormat.ICEBERG,
+            icebergMetadata: {
+                icebergSchema: {
+                    schemaFieldList: [
+                        { name: 'resourceId', type: 'string', required: true },
+                        { name: 'resourceType', type: 'string', required: true },
+                        { name: 'name', type: 'string', required: false },
+                        { name: 'arn', type: 'string', required: true },
+                        { name: 'region', type: 'string', required: true },
+                        { name: 'accountId', type: 'string', required: true },
+                        { name: 'state', type: 'string', required: false },
+                        { name: 'tags', type: 'string', required: false }, // serialized JSON
+                        { name: 'lastSeenAt', type: 'timestamp', required: true },
+                        { name: 'discoveryStatus', type: 'string', required: false }
+                    ]
+                }
+            }
+        });
+
 
         // ============================================================================
         // SNS TOPIC (from cdkStack.ts)
@@ -665,6 +805,102 @@ export class ComputeStack extends cdk.Stack {
         scaling.scaleOnMemoryUtilization('MemoryScaling', { targetUtilizationPercent: 75 });
 
         // ============================================================================
+        // DISCOVERY ECS TASK (Auto-Discovery Feature)
+        // ============================================================================
+
+        // Discovery Task Definition
+        const discoveryTaskDef = new ecs.FargateTaskDefinition(this, `${appName}-DiscoveryTaskDef`, {
+            family: `${appName}-discovery-task`,
+            executionRole: ecsTaskExecutionRole,
+            taskRole: discoveryTaskRole,
+            cpu: 1024,
+            memoryLimitMiB: 2048,
+            runtimePlatform: {
+                cpuArchitecture: ecs.CpuArchitecture.ARM64,
+                operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+            },
+        });
+
+        // Discovery container image from local Dockerfile
+        const discoveryImage = ecs.ContainerImage.fromAsset(
+            path.join(__dirname, '../lambda/discovery'),
+            { platform: ecr_assets.Platform.LINUX_ARM64 }
+        );
+
+        discoveryTaskDef.defaultContainer?.addEnvironment('S3_TABLE_BUCKET_ARN', tableBucket.tableBucketArn);
+        discoveryTaskDef.defaultContainer?.addEnvironment('S3_TABLE_NAMESPACE', 'nucleus');
+
+        discoveryTaskDef.addContainer('DiscoveryContainer', {
+            image: discoveryImage,
+            logging: ecs.LogDriver.awsLogs({
+                logGroup: discoveryLogGroup,
+                streamPrefix: 'discovery',
+            }),
+            environment: {
+                APP_TABLE_NAME: appTable.tableName,
+                INVENTORY_TABLE_NAME: inventoryTable.tableName,
+                INVENTORY_BUCKET: inventoryBucket.bucketName,
+                AWS_REGION: this.region,
+            },
+        });
+
+
+        // Security Group for Discovery Task
+        const discoverySg = new ec2.SecurityGroup(this, `${appName}-DiscoverySG`, {
+            vpc: props.vpc,
+            description: 'Security Group for AWS Auto-Discovery ECS Task',
+            allowAllOutbound: true, // Allow outbound access for AWS API calls
+        });
+
+        // EventBridge Scheduler Role for triggering ECS tasks
+        const schedulerRole = new iam.Role(this, `${appName}-DiscoverySchedulerRole`, {
+            roleName: `${appName}-discovery-scheduler-role`,
+            assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com'),
+        });
+
+        schedulerRole.addToPolicy(new iam.PolicyStatement({
+            actions: ['ecs:RunTask'],
+            resources: [discoveryTaskDef.taskDefinitionArn],
+        }));
+
+        schedulerRole.addToPolicy(new iam.PolicyStatement({
+            actions: ['iam:PassRole'],
+            resources: [
+                ecsTaskExecutionRole.roleArn,
+                discoveryTaskRole.roleArn,
+            ],
+        }));
+
+        // EventBridge Scheduler for daily discovery (2:00 AM UTC)
+        new cdk.CfnResource(this, `${appName}-DailyDiscoverySchedule`, {
+            type: 'AWS::Scheduler::Schedule',
+            properties: {
+                Name: `${appName}-daily-discovery`,
+                Description: 'Runs AWS resource discovery daily at 2:00 AM UTC',
+                ScheduleExpression: 'cron(0 2 * * ? *)',
+                FlexibleTimeWindow: { Mode: 'OFF' },
+                State: 'ENABLED',
+                Target: {
+                    Arn: ecsCluster.clusterArn,
+                    RoleArn: schedulerRole.roleArn,
+                    EcsParameters: {
+                        TaskDefinitionArn: discoveryTaskDef.taskDefinitionArn,
+                        LaunchType: 'FARGATE',
+                        NetworkConfiguration: {
+                            AwsvpcConfiguration: {
+                                Subnets: props.vpc.privateSubnets.map(s => s.subnetId),
+                                SecurityGroups: [discoverySg.securityGroupId],
+                                AssignPublicIp: 'DISABLED',
+                            },
+                        },
+                        TaskCount: 1,
+                    },
+                },
+            },
+        });
+
+
+        // ============================================================================
         // CLOUDFRONT DISTRIBUTION
         // ============================================================================
 
@@ -775,7 +1011,26 @@ export class ComputeStack extends cdk.Stack {
             value: agentTempBucket.bucketName,
             description: 'S3 Bucket for Agent Temporary Storage',
         });
+
+        // Grant web UI access to inventory bucket (for export downloads)
+        inventoryBucket.grantRead(ecsTaskRole);
+
+        // Discovery infrastructure outputs
+        new cdk.CfnOutput(this, 'InventoryTableName', {
+            value: inventoryTable.tableName,
+            description: 'DynamoDB Table for Auto-Discovery inventory data',
+        });
+        new cdk.CfnOutput(this, 'InventoryBucketName', {
+            value: inventoryBucket.bucketName,
+            description: 'S3 Bucket for Auto-Discovery inventory data',
+        });
+        new cdk.CfnOutput(this, 'DiscoveryTaskDefinitionArn', {
+            value: discoveryTaskDef.taskDefinitionArn,
+            description: 'ECS Task Definition ARN for Discovery task',
+        });
     }
+
+
 
     private generateScheduleExpressionIST(interval: number): string {
         switch (interval) {

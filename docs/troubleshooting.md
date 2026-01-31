@@ -8,3 +8,6 @@ AWS_PROFILE=STX-CLOUD-PLATFORM-ADMIN  npx cdk deploy --all --require-approval ne
 
 
 kill -9 $(lsof -t -i:3000 -sTCP:LISTEN)
+
+
+AWS_PROFILE=STX-CLOUD-PLATFORM-ADMIN python3 lambda/discovery/local_runner.py

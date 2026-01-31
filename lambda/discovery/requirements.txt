@@ -1,0 +1,5 @@
+pyiceberg[s3fs,glue]
+boto3
+python-dotenv
+pyarrow
+pandas

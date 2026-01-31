@@ -29,11 +29,13 @@ import {
   ChevronRight,
   Bot,
   Users,
+  Database,
 } from "lucide-react"
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "AWS Accounts", href: "/accounts", icon: Server },
+  { name: "Inventory", href: "/inventory", icon: Database },
   { name: "Schedules", href: "/schedules", icon: Calendar },
   { name: "Audit Logs", href: "/audit", icon: Activity },
   { name: "AI Agent", href: "/agent", icon: Bot },

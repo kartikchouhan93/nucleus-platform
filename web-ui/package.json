@@ -27,6 +27,7 @@
     "@aws-sdk/client-sts": "^3.821.0",
     "@aws-sdk/credential-providers": "^3.821.0",
     "@aws-sdk/lib-dynamodb": "^3.821.0",
+    "@aws-sdk/s3-request-presigner": "^3.980.0",
     "@casl/ability": "^6.8.0",
     "@casl/react": "^5.0.1",
     "@hookform/resolvers": "^3.9.1",
@@ -93,6 +94,7 @@
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.0.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
