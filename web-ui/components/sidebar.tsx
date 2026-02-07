@@ -35,10 +35,10 @@ import {
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "AWS Accounts", href: "/accounts", icon: Server },
-  { name: "Inventory", href: "/inventory", icon: Database },
-  { name: "Schedules", href: "/schedules", icon: Calendar },
-  { name: "Audit Logs", href: "/audit", icon: Activity },
   { name: "AI Agent", href: "/agent", icon: Bot },
+  { name: "Schedules", href: "/schedules", icon: Calendar },
+  { name: "Inventory", href: "/inventory", icon: Database },
+  { name: "Audit Logs", href: "/audit", icon: Activity },
   { name: "Users", href: "/admin/users", icon: Users },
   { name: "Settings", href: "/settings", icon: Settings },
 ]

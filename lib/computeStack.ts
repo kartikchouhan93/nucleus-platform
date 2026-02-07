@@ -282,9 +282,9 @@ export class ComputeStack extends cdk.Stack {
         }));
 
         // DynamoDB permissions for discovery
-        // App table: read accounts to scan
+        // App table: read accounts to scan and update sync status
         discoveryTaskRole.addToPolicy(new iam.PolicyStatement({
-            actions: ['dynamodb:GetItem', 'dynamodb:Query'],
+            actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:UpdateItem'],
             resources: [appTable.tableArn, `${appTable.tableArn}/index/*`],
         }));
         // Inventory table: write discovered resources
