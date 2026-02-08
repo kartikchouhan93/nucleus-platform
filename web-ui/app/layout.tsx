@@ -5,6 +5,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeConfigProvider } from "@/components/theme-config-provider";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 import { LayoutWrapper } from "@/components/layout-wrapper";
 import Providers from "@/providers/Providers";
 
@@ -37,6 +38,7 @@ export default function RootLayout({
               <div>
                 <LayoutWrapper>{children}</LayoutWrapper>
                 <Toaster />
+                <SonnerToaster richColors position="bottom-right" />
               </div>
             </ThemeConfigProvider>
           </ThemeProvider>

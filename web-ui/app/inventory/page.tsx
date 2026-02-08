@@ -82,6 +82,8 @@ const STATES = [
     { value: "in-use", label: "In Use" },
 ];
 
+const PAGE_SIZES = [10, 20, 50, 100, 200, 500];
+
 export default function InventoryPage() {
     const [resources, setResources] = useState<Resource[]>([]);
     const [loading, setLoading] = useState(true);
@@ -107,7 +109,7 @@ export default function InventoryPage() {
     // Pagination
     const [cursor, setCursor] = useState<string | undefined>();
     const [hasMore, setHasMore] = useState(false);
-    const [limit] = useState(50);
+    const [pageSize, setPageSize] = useState(50);
 
     // Helper: Get service name from resource type
     const getServiceName = (resourceType: string): string => {
@@ -126,7 +128,7 @@ export default function InventoryPage() {
         setLoading(true);
         try {
             const params = new URLSearchParams();
-            params.set("limit", limit.toString());
+            params.set("limit", pageSize.toString());
             if (resourceType !== "all") params.set("resourceType", resourceType);
             if (region !== "all") params.set("region", region);
             if (state !== "all") params.set("state", state);
@@ -149,7 +151,7 @@ export default function InventoryPage() {
         } finally {
             setLoading(false);
         }
-    }, [resourceType, region, state, accountId, searchTerm, limit]);
+    }, [resourceType, region, state, accountId, searchTerm, pageSize]);
 
     const fetchSyncStatus = async () => {
         try {
@@ -174,7 +176,10 @@ export default function InventoryPage() {
             const data = await response.json();
 
             if (response.ok) {
-                toast.success(data.message || "Discovery sync triggered");
+                toast.success("Execution started in the background. It may take a few minutes to complete.", {
+                    description: `Scan ID: ${data.scanId?.substring(0, 8) || 'N/A'}`,
+                    duration: 5000,
+                });
             } else {
                 toast.error(data.error || "Failed to trigger sync");
             }
@@ -576,8 +581,23 @@ export default function InventoryPage() {
 
                             {/* Pagination */}
                             <div className="flex items-center justify-between mt-4">
-                                <div className="text-sm text-muted-foreground">
-                                    Showing {resources.length} resources
+                                <div className="flex items-center gap-4">
+                                    <div className="text-sm text-muted-foreground">
+                                        Showing {resources.length} resources
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm text-muted-foreground">Page size:</span>
+                                        <Select value={pageSize.toString()} onValueChange={(val) => setPageSize(parseInt(val, 10))}>
+                                            <SelectTrigger className="w-[80px] h-8">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {PAGE_SIZES.map(size => (
+                                                    <SelectItem key={size} value={size.toString()}>{size}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button

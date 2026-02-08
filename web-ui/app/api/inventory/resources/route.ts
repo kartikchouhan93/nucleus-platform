@@ -70,7 +70,8 @@ export async function GET(request: NextRequest) {
         // Default tenant ID (multi-tenant ready)
         const tenantId = 'default';
 
-        // Build query based on filters
+        // Build query based on filters - prioritize most selective index
+        // Then apply remaining filters as FilterExpressions
         if (params.resourceType) {
             // Query by resource type (GSI3): RESOURCE_TYPE#{resourceType}
             queryInput = {
@@ -83,10 +84,17 @@ export async function GET(request: NextRequest) {
                 Limit: params.limit,
             };
 
-            // Add accountId filter if provided
+            // Add accountId filter as key condition if provided
             if (params.accountId) {
                 queryInput.KeyConditionExpression += ' AND begins_with(gsi3sk, :accountPrefix)';
                 queryInput.ExpressionAttributeValues![':accountPrefix'] = { S: params.accountId };
+            }
+
+            // Add region as filter expression if provided
+            if (params.region) {
+                filterExpression.push('#region = :region');
+                expressionAttributeValues[':region'] = { S: params.region };
+                expressionAttributeNames['#region'] = 'region';
             }
         } else if (params.region) {
             // Query by region (GSI2): REGION#{region}
@@ -99,6 +107,12 @@ export async function GET(request: NextRequest) {
                 },
                 Limit: params.limit,
             };
+
+            // Add accountId filter if provided
+            if (params.accountId) {
+                filterExpression.push('accountId = :accountId');
+                expressionAttributeValues[':accountId'] = { S: params.accountId };
+            }
         } else if (params.accountId) {
             // Query by account (Main Table): TENANT#{tenantId}#ACCOUNT#{accountId}
             queryInput = {

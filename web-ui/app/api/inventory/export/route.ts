@@ -39,20 +39,21 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Build query to fetch resources
+        // Build query to fetch resources - using new inventory schema
         let queryInput: QueryCommandInput;
+        const tenantId = 'default';
 
         if (accountId) {
             queryInput = {
                 TableName: INVENTORY_TABLE_NAME,
                 KeyConditionExpression: 'pk = :pk AND begins_with(sk, :sk_prefix)',
                 ExpressionAttributeValues: {
-                    ':pk': { S: `ACCOUNT#${accountId}` },
-                    ':sk_prefix': { S: 'RESOURCE#' },
+                    ':pk': { S: `TENANT#${tenantId}#ACCOUNT#${accountId}` },
+                    ':sk_prefix': { S: 'INVENTORY#' },
+                    ':active': { S: 'active' },
                 },
                 FilterExpression: 'discoveryStatus = :active',
             };
-            queryInput.ExpressionAttributeValues![':active'] = { S: 'active' };
         } else if (resourceType) {
             queryInput = {
                 TableName: INVENTORY_TABLE_NAME,
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
                 IndexName: 'GSI1',
                 KeyConditionExpression: 'gsi1pk = :pk',
                 ExpressionAttributeValues: {
-                    ':pk': { S: 'TYPE#RESOURCE' },
+                    ':pk': { S: 'TYPE#INVENTORY' },
                     ':active': { S: 'active' },
                 },
                 FilterExpression: 'discoveryStatus = :active',
