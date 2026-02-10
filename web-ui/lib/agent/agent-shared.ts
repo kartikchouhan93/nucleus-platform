@@ -211,6 +211,7 @@ export interface GraphConfig {
     accounts?: AccountContext[];   // Array of AWS accounts for multi-account querying
     accountId?: string;   // Deprecated: Single account (kept for backwards compatibility)
     accountName?: string; // Deprecated: Single account name
+    selectedSkill?: string | null; // Selected skill ID for dynamic loading
 }
 
 // --- State Definition ---

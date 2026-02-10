@@ -152,6 +152,11 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const accountDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Skills selection state
+  const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const [availableSkills, setAvailableSkills] = useState<Array<{id: string, name: string, description: string}>>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+
   // Fetch accounts on mount
   useEffect(() => {
     async function fetchAccounts() {
@@ -173,6 +178,28 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
     fetchAccounts();
   }, []);
 
+  // Fetch skills on mount
+  useEffect(() => {
+    async function fetchSkills() {
+      try {
+        setSkillsLoading(true);
+        const res = await fetch('/api/skills');
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableSkills(data.skills || []);
+          console.log('[ChatInterface] Loaded skills:', data.skills?.length || 0);
+        } else {
+          console.error('[ChatInterface] Failed to fetch skills:', res.status);
+        }
+      } catch (error) {
+        console.error('[ChatInterface] Failed to load skills:', error);
+      } finally {
+        setSkillsLoading(false);
+      }
+    }
+    fetchSkills();
+  }, []);
+
   // Get selected account details for API - supports multi-account
   const selectedAccounts = accounts.filter(a => selectedAccountIds.includes(a.accountId));
 
@@ -192,6 +219,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
         model: selectedModel,
         mode: agentMode,
         accounts: selectedAccounts.length > 0 ? selectedAccounts.map(a => ({ accountId: a.accountId, accountName: a.name })) : undefined,
+        selectedSkill: selectedSkill || undefined,
     },
     onResponse: (response: Response) => {
         console.log('[ChatInterface] Received response headers:', response);
@@ -334,6 +362,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
         model: selectedModel,
         mode: agentMode,
         accounts: selectedAccounts.length > 0 ? selectedAccounts.map(a => ({ accountId: a.accountId, accountName: a.name })) : undefined,
+        selectedSkill: selectedSkill || undefined,
       }
     });
   };
@@ -371,6 +400,7 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
         model: selectedModel,
         mode: agentMode,
         accounts: selectedAccounts.length > 0 ? selectedAccounts.map(a => ({ accountId: a.accountId, accountName: a.name })) : undefined,
+        selectedSkill: selectedSkill || undefined,
       }
     });
   };
@@ -612,6 +642,11 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
             <p className="text-xs text-muted-foreground flex items-center gap-1">
               Plan → Execute → Reflect → Revise
               {autoApprove && <span className="text-success ml-1">(Auto-Approve ON)</span>}
+              {selectedSkill && (
+                <span className="text-purple-600 ml-1 flex items-center gap-1">
+                  • <Briefcase className="w-3 h-3" /> {availableSkills.find(s => s.id === selectedSkill)?.name}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -723,6 +758,9 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
               </div>
             )}
         </div>
+
+          {/* Skills Selector Dropdown */}
+
 
         </div>
       </div>
@@ -889,6 +927,40 @@ export function ChatInterface({ threadId: initialThreadId }: ChatInterfaceProps)
                   {AVAILABLE_MODELS.map((model) => (
                     <SelectItem key={model.id} value={model.id} className="text-xs">
                       {model.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Skills Selector */}
+              <Select 
+                value={selectedSkill || "none"} 
+                onValueChange={(value) => setSelectedSkill(value === "none" ? null : value)}
+                disabled={hasStarted}
+              >
+                <SelectTrigger className="h-7 text-xs border-transparent bg-transparent hover:bg-muted/50 focus:ring-0 gap-1 px-2 w-auto min-w-[180px]">
+                  <div className="flex items-center gap-1.5">
+                    <Briefcase className={cn("w-3 h-3", selectedSkill ? "text-purple-500" : "text-muted-foreground")} />
+                    <span className="truncate max-w-[140px]">
+                      {selectedSkill ? availableSkills.find(s => s.id === selectedSkill)?.name : "Select Agent Skill"}
+                    </span>
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <div className="flex flex-col">
+                      <span className="font-medium">General DevOps</span>
+                      <span className="text-xs text-muted-foreground">No specific skill</span>
+                    </div>
+                  </SelectItem>
+                  {availableSkills.map((skill) => (
+                    <SelectItem key={skill.id} value={skill.id}>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{skill.name}</span>
+                        <span className="text-xs text-muted-foreground truncate max-w-[250px]">
+                          {skill.description}
+                        </span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>

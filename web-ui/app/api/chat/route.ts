@@ -34,7 +34,8 @@ export async function POST(req: Request) {
             stream = true,
             accounts,       // Array of { accountId, accountName } for multi-account querying
             accountId,      // Deprecated: single AWS account ID for backwards compatibility
-            accountName     // Deprecated: single AWS account name
+            accountName,    // Deprecated: single AWS account name
+            selectedSkill   // Skill ID for dynamic skill loading
         } = await req.json();
         const threadId = requestThreadId || Date.now().toString();
 
@@ -68,7 +69,8 @@ export async function POST(req: Request) {
             autoApprove: autoApprove,
             accounts: accounts,         // Pass accounts array for multi-account querying
             accountId: accountId,       // Backwards compatibility
-            accountName: accountName
+            accountName: accountName,
+            selectedSkill: selectedSkill || null,  // Pass selectedSkill for dynamic loading
         };
 
         const graph = mode === 'fast'

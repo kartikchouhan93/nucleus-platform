@@ -13,6 +13,7 @@ import {
     webSearchTool,
     getAwsCredentialsTool
 } from "./tools";
+import { getSkillContent } from "./skills/skill-loader";
 import {
     GraphConfig,
     ReflectionState,
@@ -26,7 +27,19 @@ import {
 
 // Factory function to create a configured reflection graph
 export function createReflectionGraph(config: GraphConfig) {
-    const { model: modelId, autoApprove, accounts, accountId, accountName } = config;
+    const { model: modelId, autoApprove, accounts, accountId, accountName, selectedSkill } = config;
+
+    // Load skill content if a skill is selected
+    let skillContent = '';
+    if (selectedSkill) {
+        const content = getSkillContent(selectedSkill);
+        if (content) {
+            skillContent = `\n\n=== SELECTED SKILL INSTRUCTIONS ===\n${content}\n\nYou MUST follow the above skill-specific instructions for this conversation. These instructions take precedence and guide your approach to handling user requests.\n=== END SKILL INSTRUCTIONS ===\n`;
+            console.log(`[PlanningAgent] Loaded skill: ${selectedSkill}`);
+        } else {
+            console.warn(`[PlanningAgent] Failed to load skill content for: ${selectedSkill}`);
+        }
+    }
 
     // --- Model Initialization ---
     const model = new ChatBedrockConverse({
@@ -89,7 +102,7 @@ NEVER use the host's default credentials - always use the profile returned from 
 
         const plannerSystemPrompt = new SystemMessage(`You are an expert DevOps and Cloud Infrastructure planning agent.
 Given a task, create a clear step-by-step plan to accomplish it, utilizing your expertise in AWS, Docker, Kubernetes, and CI/CD.
-
+${skillContent}
 IMPORTANT: You are a READ-ONLY agent. You MUST NOT create plans that modify, create, or delete resources.
 - Focus ONLY on observability, diagnosis, status checks, and log analysis.
 - Do NOT plan to deploy stacks, update services, or write to files unless explicitly for logging/reporting (and even then, prefer stdout).
@@ -170,7 +183,7 @@ Only return the JSON array, nothing else.`);
 
         const executorSystemPrompt = new SystemMessage(`You are an expert DevOps and Cloud Infrastructure executor agent.
 Your goal is to execute technical tasks with precision, utilizing tools like AWS CLI, git, bash, and more.
-
+${skillContent}
 IMPORTANT: You are a READ-ONLY agent.
 - You MUST NOT execute commands that modify, create, or delete infrastructure or files (unless strictly necessary for reporting).
 - If the plan asks you to perform a mutation, REFUSE and explain that you are in read-only mode.
