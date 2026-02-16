@@ -19,6 +19,7 @@ import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as path from "path";
 import * as crypto from "crypto";
+import * as s3_notifications from "aws-cdk-lib/aws-s3-notifications";
 import { Construct } from "constructs";
 import { TableBucket, Namespace, Table, OpenTableFormat } from '@aws-cdk/aws-s3tables-alpha';
 import { RemovalPolicy } from "aws-cdk-lib";
@@ -299,6 +300,43 @@ export class ComputeStack extends cdk.Stack {
 
         // S3 permissions for discovery
         inventoryBucket.grantReadWrite(discoveryTaskRole);
+
+        // Vector Processor Lambda
+        const vectorProcessor = new lambda.Function(
+          this,
+          `${appName}-VectorProcessor`,
+          {
+            functionName: `${stackName}-vector-processor`,
+            runtime: lambda.Runtime.PYTHON_3_12,
+            handler: "index.handler",
+            code: lambda.Code.fromAsset(
+              path.join(__dirname, "../lambda/vector_processor/src"),
+            ),
+            timeout: cdk.Duration.minutes(15),
+            memorySize: 1024,
+            environment: {
+              INVENTORY_BUCKET_NAME: inventoryBucket.bucketName,
+            },
+          },
+        );
+
+        // Grant S3 permissions
+        inventoryBucket.grantReadWrite(vectorProcessor);
+
+        // Grant Bedrock permissions
+        vectorProcessor.addToRolePolicy(
+          new iam.PolicyStatement({
+            actions: ["bedrock:InvokeModel"],
+            resources: ["*"],
+          }),
+        );
+
+        // Add S3 Event Notification
+        inventoryBucket.addEventNotification(
+          s3.EventType.OBJECT_CREATED,
+          new s3_notifications.LambdaDestination(vectorProcessor),
+          { prefix: "merged/" },
+        );
 
         // S3 Tables permissions (for managed Iceberg tables)
         discoveryTaskRole.addToPolicy(new iam.PolicyStatement({

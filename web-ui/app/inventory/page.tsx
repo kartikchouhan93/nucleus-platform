@@ -58,11 +58,20 @@ interface InventoryStatus {
 const RESOURCE_TYPES = [
     { value: "all", label: "All Types" },
     { value: "ec2_instances", label: "EC2 Instances" },
-    { value: "rds_instances", label: "RDS Instances" },
-    { value: "docdb_instances", label: "DocumentDB Instances" },
-    { value: "asg_groups", label: "Auto Scaling Groups" },
+    { value: "rds_db_instances", label: "RDS Instances" },
+    { value: "docdb_db_clusters", label: "DocumentDB Clusters" },
+    { value: "autoscaling_auto_scaling_groups", label: "Auto Scaling Groups" },
     { value: "ecs_services", label: "ECS Services" },
+    { value: "ec2_addresses", label: "Elastic IPs" },
+    { value: "ec2_nat_gateways", label: "NAT Gateways" },
+    { value: "ec2_security_groups", label: "Security Groups" },
+    { value: "ec2_subnets", label: "Subnets" },
+    { value: "ec2_network_interfaces", label: "Elastic Network Interfaces" },
+    { value: "lambda_functions", label: "Lambda Functions" },
     { value: "dynamodb_tables", label: "DynamoDB Tables" },
+    { value: "acm_certificates", label: "ACM Certificates" },
+    { value: "apigateway_rest_apis", label: "API Gateway" },
+    { value: "kms_keys", label: "KMS Keys" },
 ];
 
 const REGIONS = [
@@ -74,13 +83,7 @@ const REGIONS = [
     { value: "ap-southeast-1", label: "Asia Pacific (Singapore)" },
 ];
 
-const STATES = [
-    { value: "all", label: "All States" },
-    { value: "running", label: "Running" },
-    { value: "stopped", label: "Stopped" },
-    { value: "available", label: "Available" },
-    { value: "in-use", label: "In Use" },
-];
+
 
 const PAGE_SIZES = [10, 20, 50, 100, 200, 500];
 
@@ -103,7 +106,7 @@ export default function InventoryPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [resourceType, setResourceType] = useState("all");
     const [region, setRegion] = useState("all");
-    const [state, setState] = useState("all");
+
     const [accountId, setAccountId] = useState("all");
     
     // Pagination
@@ -115,11 +118,20 @@ export default function InventoryPage() {
     const getServiceName = (resourceType: string): string => {
         const serviceMap: Record<string, string> = {
             ec2_instances: "EC2",
-            rds_instances: "RDS",
+            rds_db_instances: "RDS",
             ecs_services: "ECS",
-            asg_groups: "Auto Scaling",
+            ec2_addresses: "EC2",
+            ec2_nat_gateways: "EC2",
+            ec2_security_groups: "EC2",
+            ec2_subnets: "EC2",
+            ec2_network_interfaces: "EC2",
+            lambda_functions: "Lambda",
+            autoscaling_auto_scaling_groups: "Auto Scaling",
             dynamodb_tables: "DynamoDB",
-            docdb_instances: "DocumentDB",
+            docdb_db_clusters: "DocumentDB",
+            acm_certificates: "ACM",
+            apigateway_rest_apis: "APIGateway",
+            kms_keys: "KMS",
         };
         return serviceMap[resourceType] || resourceType.replace(/_/g, " ").toUpperCase();
     };
@@ -131,7 +143,7 @@ export default function InventoryPage() {
             params.set("limit", pageSize.toString());
             if (resourceType !== "all") params.set("resourceType", resourceType);
             if (region !== "all") params.set("region", region);
-            if (state !== "all") params.set("state", state);
+
             if (accountId !== "all") params.set("accountId", accountId);
             if (searchTerm) params.set("search", searchTerm);
             if (newCursor) params.set("cursor", newCursor);
@@ -151,7 +163,7 @@ export default function InventoryPage() {
         } finally {
             setLoading(false);
         }
-    }, [resourceType, region, state, accountId, searchTerm, pageSize]);
+    }, [resourceType, region, accountId, searchTerm, pageSize]);
 
     const fetchSyncStatus = async () => {
         try {
@@ -227,7 +239,7 @@ export default function InventoryPage() {
             fetchResources();
         }, 300);
         return () => clearTimeout(timer);
-    }, [searchTerm, resourceType, region, state, accountId, fetchResources]);
+    }, [searchTerm, resourceType, region, accountId, fetchResources]);
 
     // Fetch accounts for filter dropdown
     useEffect(() => {
@@ -265,20 +277,7 @@ export default function InventoryPage() {
         return <Cloud className="h-4 w-4" />;
     };
 
-    const getStateBadge = (resourceState: string) => {
-        const stateColors: Record<string, string> = {
-            running: "bg-green-500/10 text-green-500 border-green-500/20",
-            stopped: "bg-red-500/10 text-red-500 border-red-500/20",
-            available: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-            pending: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
-            terminated: "bg-gray-500/10 text-gray-500 border-gray-500/20",
-        };
-        return (
-            <Badge variant="outline" className={stateColors[resourceState.toLowerCase()] || "bg-gray-500/10"}>
-                {resourceState}
-            </Badge>
-        );
-    };
+
 
     // Use centralized sync status from new API structure
     const totalResources = inventoryStatus?.totalResources || 0;
@@ -395,16 +394,7 @@ export default function InventoryPage() {
                                 ))}
                             </SelectContent>
                         </Select>
-                        <Select value={state} onValueChange={setState}>
-                            <SelectTrigger className="w-[140px]">
-                                <SelectValue placeholder="State" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {STATES.map(s => (
-                                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+
                         
                         {/* Account Filter with Search */}
                         <Popover open={openAccountCombobox} onOpenChange={setOpenAccountCombobox}>
@@ -505,7 +495,7 @@ export default function InventoryPage() {
                                         <TableHead>Type</TableHead>
                                         <TableHead>Region</TableHead>
                                         <TableHead>Account</TableHead>
-                                        <TableHead>State</TableHead>
+
                                         <TableHead>Tags</TableHead>
                                         <TableHead>Last Discovered</TableHead>
                                     </TableRow>
@@ -538,7 +528,7 @@ export default function InventoryPage() {
                                             </TableCell>
                                             <TableCell>{resource.region}</TableCell>
                                             <TableCell className="font-mono text-sm">{resource.accountId}</TableCell>
-                                            <TableCell>{getStateBadge(resource.state)}</TableCell>
+
                                             <TableCell>
                                                 <TooltipProvider>
                                                     <Tooltip>
