@@ -24,6 +24,7 @@ import { Construct } from "constructs";
 import { TableBucket, Namespace, Table, OpenTableFormat } from '@aws-cdk/aws-s3tables-alpha';
 import { RemovalPolicy } from "aws-cdk-lib";
 import { Bucket as VectorBucket, Index } from 'cdk-s3-vectors';
+import { getConfig } from './config';
 
 export interface ComputeStackProps extends cdk.StackProps {
     vpc: ec2.Vpc;
@@ -46,16 +47,17 @@ export class ComputeStack extends cdk.Stack {
         super(scope, id, props);
 
         // ============================================================================
-        // CONFIGURATION FROM CONTEXT
+        // CONFIGURATION FROM CONFIG.TS (ENV VARS)
         // ============================================================================
 
-        const appName = this.node.tryGetContext('appName') || 'nucleus-app';
+        const config = getConfig();
+        const appName = config.appName;
         const SCHEDULE_INTERVAL = 30; // Defaulting to 30 as context is being removed
         const CROSS_ACCOUNT_ROLE_NAME = 'CrossAccountRoleForCostOptimizationScheduler';
         const SCHEDULER_TAG = 'cost-optimization-scheduler';
-        const subscriptionEmails = this.node.tryGetContext('subscriptionEmails') || [];
-        const customDomainConfig = this.node.tryGetContext('customDomain') || {};
-        const ecsConfig = this.node.tryGetContext('ecs') || {};
+        const subscriptionEmails = config.subscriptionEmails;
+        const customDomainConfig = config.customDomain;
+        const ecsConfig = config.ecs;
 
         const stackName = `${appName}`;
         const webUiStackName = `${appName}-web-ui`;
