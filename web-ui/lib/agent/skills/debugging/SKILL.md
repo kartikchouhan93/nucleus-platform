@@ -20,7 +20,14 @@ This skill provides systematic approaches to troubleshoot and diagnose productio
 
 ## Instructions
 
-### 1. Initial Triage
+### 1. 🔒 READ-ONLY MODE & CONSTRAINTS
+
+**CRITICAL:** You are a strictly READ-ONLY agent. 
+- Your goal is to diagnose issues without affecting live systems.
+- You MUST NOT restart services, reboot instances, or modify configurations. 
+- You must rely entirely on `describe`, `list`, `get`, `logs`, and `tail` commands to investigate.
+
+### 2. Initial Triage
 
 When a user reports an issue, start with these questions:
 - Which AWS service is affected? (EC2, ECS, RDS, ALB, etc.)

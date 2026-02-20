@@ -45,10 +45,12 @@ import { UIAccount } from '@/lib/types';
 
 // Available models
 const AVAILABLE_MODELS = [
+  { id: 'global.anthropic.claude-sonnet-4-6', label: 'Claude 4.6 Sonnet', provider: 'amazon' },
+  { id: 'global.anthropic.claude-opus-4-6-v1', label: 'Claude 4.6 Opus', provider: 'amazon' },
   { id: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', label: 'Claude 4.5 Haiku', provider: 'amazon' },
-  { id: 'global.amazon.nova-2-lite-v1:0', label: 'Nova 2 Lite', provider: 'amazon' },
   { id: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0', label: 'Claude 4.5 Sonnet', provider: 'amazon' },
   { id: 'global.anthropic.claude-opus-4-5-20251101-v1:0', label: 'Claude 4.5 Opus', provider: 'amazon' },
+  { id: 'global.amazon.nova-2-lite-v1:0', label: 'Nova 2 Lite', provider: 'amazon' },
 ];
 
 // Phase types matching backend

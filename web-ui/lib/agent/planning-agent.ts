@@ -34,6 +34,8 @@ export async function createReflectionGraph(config: GraphConfig) {
 
     // Load skill content if a skill is selected
     let skillContent = '';
+    const isDevOpsSkill = selectedSkill === 'devops';
+    
     if (selectedSkill) {
         const content = getSkillContent(selectedSkill);
         if (content) {
@@ -43,6 +45,14 @@ export async function createReflectionGraph(config: GraphConfig) {
             console.warn(`[PlanningAgent] Failed to load skill content for: ${selectedSkill}`);
         }
     }
+
+    const readOnlyInstruction = isDevOpsSkill 
+        ? `IMPORTANT: You are operating with DEVOPS MUTATION PRIVILEGES. 
+- You ARE allowed to create, update, delete, start, stop, and modify AWS infrastructure resources as requested by the user.
+- Follow safety guidelines: prefer dry-runs if unsure, output confirmation prompts for destructive actions, and verify resource IDs before applying changes.`
+        : `IMPORTANT: You are a READ-ONLY agent. You MUST NOT create plans that modify, create, or delete resources.
+- Focus ONLY on observability, diagnosis, status checks, and log analysis.
+- Do NOT plan to deploy stacks, update services, or write to files unless explicitly for logging/reporting (and even then, prefer stdout).`;
 
     // --- Model Initialization ---
     const model = new ChatBedrockConverse({
@@ -119,9 +129,7 @@ NEVER use the host's default credentials - always use the profile returned from 
         const plannerSystemPrompt = new SystemMessage(`You are an expert DevOps and Cloud Infrastructure planning agent.
 Given a task, create a clear step-by-step plan to accomplish it, utilizing your expertise in AWS, Docker, Kubernetes, and CI/CD.
 ${skillContent}
-IMPORTANT: You are a READ-ONLY agent. You MUST NOT create plans that modify, create, or delete resources.
-- Focus ONLY on observability, diagnosis, status checks, and log analysis.
-- Do NOT plan to deploy stacks, update services, or write to files unless explicitly for logging/reporting (and even then, prefer stdout).
+${readOnlyInstruction}
 
 Focus on actionable steps that can be executed using available tools:
 - read_file: Read content from a file (supports line ranges)
@@ -200,10 +208,10 @@ Only return the JSON array, nothing else.`);
         const executorSystemPrompt = new SystemMessage(`You are an expert DevOps and Cloud Infrastructure executor agent.
 Your goal is to execute technical tasks with precision, utilizing tools like AWS CLI, git, bash, and more.
 ${skillContent}
-IMPORTANT: You are a READ-ONLY agent.
+${isDevOpsSkill ? `IMPORTANT: You have DEVOPS MUTATION ACCESS. You are authorized to execute commands that modify, create, or delete infrastructure if the plan requires it.` : `IMPORTANT: You are a READ-ONLY agent.
 - You MUST NOT execute commands that modify, create, or delete infrastructure or files (unless strictly necessary for reporting).
 - If the plan asks you to perform a mutation, REFUSE and explain that you are in read-only mode.
-- Your AWS IAM role is read-only.
+- Your AWS IAM role is read-only.`}
 
 Based on the plan, execute the current step using available tools.
 
@@ -284,9 +292,11 @@ After using tools (or if no tools are needed), provide a brief summary of what y
 
         const reflectorSystemPrompt = new SystemMessage(`You are a Senior DevOps Engineer reviewing work for best practices, security, and correctness.
 
-IMPORTANT: Ensure the agent is adhering to READ-ONLY protocols.
+${isDevOpsSkill ? `IMPORTANT: The agent has DEVOPS MUTATION ACCESS.
+- Ensure the agent is performing mutations safely and verifying outcomes.
+- Flag risky destructive commands if they lack appropriate checks, but mutations themselves are ALLOWED.` : `IMPORTANT: Ensure the agent is adhering to READ-ONLY protocols.
 - Flag any attempt to modify, create, or delete resources as a CRITICAL ISSUE.
-- Verify that only diagnosis, observation, and status checks were performed.
+- Verify that only diagnosis, observation, and status checks were performed.`}
 
 Original Task: ${taskDescription}
 

@@ -33,6 +33,8 @@ export async function createFastGraph(config: GraphConfig) {
 
     // Load skill content if a skill is selected
     let skillContent = '';
+    const isDevOpsSkill = selectedSkill === 'devops';
+
     if (selectedSkill) {
         const content = getSkillContent(selectedSkill);
         if (content) {
@@ -42,6 +44,16 @@ export async function createFastGraph(config: GraphConfig) {
             console.warn(`[FastAgent] Failed to load skill content for: ${selectedSkill}`);
         }
     }
+
+    const readOnlyInstruction = isDevOpsSkill
+        ? `IMPORTANT: You are operating with DEVOPS MUTATION PRIVILEGES. 
+- You ARE allowed to create, update, delete, start, stop, and modify AWS infrastructure resources as requested by the user.
+- If asked to perform a mutation, execute it using the CLI cautiously.`
+        : `IMPORTANT: You are a READ-ONLY agent.
+- You MUST NOT perform any mutation operations (create, update, delete resources).
+- You MUST NOT execute dangerous commands (rm, mv, etc).
+- Your AWS IAM role is read-only.
+- If asked to perform a mutation, politely refuse and explain your read-only limitations.`;
 
     // --- Model Initialization ---
     const model = new ChatBedrockConverse({
@@ -101,11 +113,7 @@ NEVER use the host's default credentials - always use the profile returned from 
 You have access to tools: read_file, write_file, edit_file, ls, glob, grep, execute_command, web_search, get_aws_credentials.
 You are proficient with AWS CLI, git, shell scripting, and infrastructure management.
 ${skillContent}
-IMPORTANT: You are a READ-ONLY agent.
-- You MUST NOT perform any mutation operations (create, update, delete resources).
-- You MUST NOT execute dangerous commands (rm, mv, etc).
-- Your AWS IAM role is read-only.
-- If asked to perform a mutation, politely refuse and explain your read-only limitations.
+${readOnlyInstruction}
 
 CONVERSATION CONTINUITY: Review the conversation history carefully.
 If this is a follow-up question, use the context from previous exchanges to provide accurate and relevant responses.
@@ -173,7 +181,7 @@ Analyze the response for:
 1. Correctness
 2. Completeness (did it answer the user's request?)
 3. Missing details
-4. SECURITY: Ensure the assistant acted as a READ-ONLY agent. If it performed any mutation/write/delete operations, flag this as a major error.
+4. SECURITY: ${isDevOpsSkill ? `The assistant has MUTATION PRIVILEGES. Ensure destructive actions were performed intentionally, cautiously, and successfully.` : `Ensure the assistant acted as a READ-ONLY agent. If it performed any mutation/write/delete operations on AWS, flag this as a major error.`}
 
 If the response is good and complete, respond with "COMPLETE".
 If there are issues, list them clearly and concisely as feedback for the assistant to fix.
