@@ -2,263 +2,224 @@
 
 ## Overview
 
-Nucleus Cloud Ops is an enterprise-grade AWS cost optimization and resource scheduling platform that provides centralized control over AWS resources across multiple accounts. The platform automates start/stop operations for EC2, RDS, and ECS services based on user-defined schedules, delivering significant cost savings for non-production environments.
+Nucleus Cloud Ops is an enterprise-grade AWS operations, cost optimization, and resource discovery platform. It provides centralized control over AWS resources across multiple accounts through a powerful "Plan and Execute" AI Agent developed on top of LangGraph and AWS.
 
-## System Architecture
+The platform automates complex DevOps workflows, infrastructure modifications, and resource scheduling using secure cross-account assume roles.
+
+## High-Level Architecture Diagram
 
 ```mermaid
-graph TB
-    subgraph "Frontend Layer"
-        UI[Next.js 15 Web UI]
-        Auth[NextAuth.js]
+
+
+flowchart TB
+    %% Styling (Professional Corporate Palette)
+    classDef aws fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#000000
+    classDef agent fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px,color:#000000
+    classDef database fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,color:#000000
+    classDef storage fill:#e8f5e9,stroke:#4caf50,stroke-width:2px,color:#000000
+    classDef serverless fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#000000
+    classDef external fill:#f5f5f5,stroke:#9e9e9e,stroke-width:2px,color:#000000,stroke-dasharray: 5,5
+
+    %% Users
+    User("👨‍💻 DevOps / SRE"):::external
+    Admin("🛡️ Admin"):::external
+
+    %% Auth Layer
+    subgraph AuthLayer
+        Cognito["AWS Cognito<br>UserPool and IdentityPool"]:::aws
     end
-    
-    subgraph "Backend Layer"
-        API[Next.js API Routes]
-        Agent[LangGraph AI Agent]
-        Scheduler[Lambda Scheduler]
+
+    %% Main Application Layout
+    subgraph Nucleus_Platform ["Nucleus Cloud Ops Platform"]
+        direction LR
+
+        %% Web & Agent Tier (ECS Fargate) - LEFT
+        subgraph Web_and_Agent_Tier ["Web & Agent Tier (ECS Fargate)"]
+            direction TB
+            UI["Next.js Web Interface"]:::aws
+            subgraph LangGraph_Agent ["LangGraph Agent Orchestration"]
+                direction TB
+                Planner["Planner Node"]:::agent
+                Generator["Executor Node"]:::agent
+                Reflector["Reflector Node"]:::agent
+                Reviser["Reviser Node"]:::agent
+                
+                subgraph Agent_Skills ["Agent Skills & Tools"]
+                    direction LR
+                    LocalTools["Local Tools<br>(AWS CLI, Bash)"]:::agent
+                    MCPGrafana["MCP Server<br>(Grafana)"]:::agent
+                    MCPK8s["MCP Server<br>(Kubernetes)"]:::agent
+                end
+                
+                Planner --> Generator
+                Generator <--> Agent_Skills
+                Generator --> Reflector
+                Reflector --> Reviser
+                Reviser --> Agent_Skills
+            end
+            UI <--> Planner
+        end
+
+        %% Backend Services - RIGHT
+        subgraph Backend_Services ["Backend Data & AI"]
+            direction TB
+            
+            subgraph Data_Stores ["Data Store Tier"]
+                direction TB
+                AppTable[(App Table)]:::database
+                LGCheckpoints[(LangGraph<br>Checkpoints)]:::database
+                LGConversations[(Agent<br>Conversations)]:::database
+            end
+
+            subgraph Blob_Storage ["Storage Tier"]
+                direction TB
+                TempBucket[(Agent Temp Bucket)]:::storage
+                CheckpointBucket[(Checkpoint Offload)]:::storage
+            end
+
+            subgraph AI_Models ["AI Models"]
+                direction TB
+                Claude[" ChatBedrockConverse <br> [Inference]"]:::aws
+            end
+        end
     end
-    
-    subgraph "Data Layer"
-        DDB[(DynamoDB)]
-        Checkpoint[(DynamoDB Checkpointer)]
+
+    %% Target Environments
+    subgraph Target_Environments
+        CrossAccountRole["Cross-Account<br>AssumeRole"]:::external
+        TargetResources["AWS Resources<br>EC2, RDS, VPC..."]:::external
+        CrossAccountRole -. manages .-> TargetResources
     end
+
+    %% Connections
+    User -. authenticates .-> Cognito
+    Admin -. authenticates .-> Cognito
+    Cognito --> UI
     
-    subgraph "AWS Integration"
-        STS[AWS STS]
-        CrossRole[Cross-Account IAM Roles]
-        EC2[EC2 Service]
-        RDS[RDS Service]
-        ECS[ECS Service]
-    end
+    %% Enforce Layout (Hidden Link)
+    Web_and_Agent_Tier ~~~ Backend_Services
     
-    UI --> Auth
-    UI --> API
-    UI --> Agent
-    API --> DDB
-    Agent --> Checkpoint
-    Agent --> STS
-    Scheduler --> DDB
-    Scheduler --> CrossRole
-    CrossRole --> EC2
-    CrossRole --> RDS
-    CrossRole --> ECS
+    %% AI connections
+    Generator -->|LLM Calls| Claude
+
+    %% Web/Agent to DB
+    UI --> AppTable
+    Generator --> LGCheckpoints
+    Generator --> LGConversations
+
+    %% Web/Agent to S3
+    Generator --> CheckpointBucket
+    Generator --> TempBucket
+
+    LocalTools -. assumes .-> CrossAccountRole
+
+
 ```
 
 ## Technology Stack
 
-### Frontend
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Next.js | 15.2.4 | React framework with App Router |
-| React | 19 | UI library |
-| Tailwind CSS | 3.4.x | Utility-first CSS framework |
-| Radix UI | Various | Accessible component primitives |
-| Lucide React | 0.454.0 | Icon library |
-| Recharts | Latest | Dashboard charts |
+### Frontend & Agent Backend
+| Technology | Purpose |
+|------------|---------|
+| Next.js 15 (React 19) | Web UI and API Routes |
+| LangGraph & LangChain | AI Agent Orchestration, stateful execution, graph workflow |
+| AWS SDK v3 | Deep integration with AWS services for agent tooling |
 
-### Backend
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Node.js | 22.x | Runtime environment |
-| AWS SDK v3 | 3.x | AWS service integration |
-| LangGraph | 0.2.0 | AI agent orchestration |
-| LangChain | 0.3.0 | LLM framework |
-| AWS Bedrock | - | AI model provider (Claude 4.5 Sonnet) |
-| Zod | 3.24.x | Schema validation |
+### AI & Data
+| Technology | Purpose |
+|------------|---------|
+| AWS Bedrock | LLM Provider (Claude Sonnet for logic, Amazon Titan for Embeddings) |
+| DynamoDB | Real-time state (LangGraph checkpoints, App data, RBAC, Single Table Design) |
+| Amazon S3 Tables | Apache Iceberg formatted Data Lake for multi-account resource inventory |
+| cdk-s3-vectors | Vector embeddings store for RAG and semantic search operations |
 
 ### Infrastructure
 | Technology | Purpose |
 |------------|---------|
 | AWS CDK | Infrastructure as Code |
-| AWS Lambda | Serverless scheduler execution |
-| AWS DynamoDB | Primary database (Single Table Design) |
-| AWS EventBridge | Cron-based schedule triggers |
-| AWS Cognito | User authentication |
-| AWS ECS/Fargate | Container hosting |
+| AWS ECS Fargate | Serverless execution environment for Next.js and LangGraph Agent |
+| AWS Lambda | Event-driven processors (Vector embeddings generation, Schedulers) |
+| AWS Cognito | User Identity & Authentication |
 
-## Data Architecture
+## AI Ops Agent Workflow
 
-### Single Table Design
+The core AI engine relies on a **Reflection Pattern** established via LangGraph parameters. 
 
-Nucleus Cloud Ops uses DynamoDB with a Single Table Design for optimal query performance:
+1. **Planner Node**: Breaks down complex DevOps tasks across multiple AWS environments into actionable steps.
+2. **Executor Node (Generate)**: Executes the planned steps via tools contextually.
+3. **Tool Node**: Injects customized execution commands (AWS CLI via STS AssumeRole, File manipulation, Web Search, MCP servers).
+4. **Reflector Node**: An AI secondary loop that independently analyzes the Executor's results for logical consistency and security compliance.
+5. **Reviser Node**: In case of failures or sub-optimal outcomes, automatically self-corrects the approach without user intervention.
+6. **Final Node**: Summarizes the outcome and updates `AgentConversationsTable`.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Main Application Table                        │
-├─────────────────┬───────────────────────────────────────────────┤
-│ Entity Type     │ Access Pattern                                │
-├─────────────────┼───────────────────────────────────────────────┤
-│ TENANT          │ PK: TENANT#{id}, SK: METADATA                 │
-│ ACCOUNT         │ PK: TENANT#{tenantId}, SK: ACCOUNT#{id}       │
-│ SCHEDULE        │ PK: TENANT#{tenantId}, SK: SCHEDULE#{id}      │
-│ RESOURCE        │ PK: SCHEDULE#{scheduleId}, SK: RESOURCE#{id}  │
-└─────────────────┴───────────────────────────────────────────────┘
+### DevOps Agent Internal Flow
 
-┌─────────────────────────────────────────────────────────────────┐
-│                       Audit Table                                │
-├─────────────────┬───────────────────────────────────────────────┤
-│ Entity Type     │ Access Pattern                                │
-├─────────────────┼───────────────────────────────────────────────┤
-│ USER_ACTION     │ PK: TENANT#{tenantId}, SK: AUDIT#{timestamp}  │
-│ SYSTEM_ACTION   │ PK: SCHEDULE#{scheduleId}, SK: EXEC#{timestamp}│
-└─────────────────┴───────────────────────────────────────────────┘
-```
-
-### Checkpointing Tables
-
-For AI Agent persistence:
-- `DYNAMODB_CHECKPOINT_TABLE`: Stores graph state checkpoints
-- `DYNAMODB_WRITES_TABLE`: Stores incremental writes for streaming
-
-## Security Architecture
-
-### Cross-Account Access Model
+Below is the detailed flow for the AI Agent execution loop, highlighting how it manages context, persistence, and external execution.
 
 ```mermaid
 sequenceDiagram
-    participant Platform as Nucleus Platform
-    participant STS as AWS STS
-    participant Role as Target Account Role
-    participant Resources as Target Resources
+    participant User
+    participant Graph as LangGraph Engine
+    participant LLM as Claude Sonnet
+    participant Planner
+    participant Executor
+    participant Reflector
+    participant Reviser
+    participant Tools as DevOps Tools
+    participant AWS as Target AWS Environment
+
+    User->>Graph: Submits Task (e.g. "Check ALB Logs")
     
-    Platform->>STS: AssumeRole(CrossAccountRoleARN)
-    STS-->>Platform: Temporary Credentials
-    Platform->>Role: Use temporary credentials
-    Role->>Resources: Start/Stop EC2, RDS, ECS
-    Resources-->>Platform: Success/Failure
+    Graph->>LLM: Analyze request & determine approach
+    LLM-->>Graph: Returns strategy
+    
+    Graph->>Planner: Generate Execution Plan
+    Planner-->>Graph: [Plan: 1. Get Creds, 2. Run AWS CLI, 3. Analyze]
+    
+    loop Max Iterations (default 5)
+        Graph->>Executor: Execute next pending step
+        Executor->>LLM: Determine necessary tools
+        LLM-->>Executor: Tool Call Requests
+        
+        Executor->>Tools: Dispatch tool execution
+        opt If AWS Action Required
+            Tools->>AWS: sts:AssumeRole (Cross-Account)
+            AWS-->>Tools: Temporary Credentials
+            Tools->>AWS: Execute aws cli action
+            AWS-->>Tools: Command Output
+        end
+        Tools-->>Graph: Aggregated Tool Results
+        
+        Graph->>Reflector: Analyze Execution Output
+        Reflector->>LLM: Verify correctness, compliance, & errors
+        
+        alt Execution is successful
+            LLM-->>Reflector: "Task Complete"
+            Reflector-->>Graph: isComplete = true
+        else Issues Found
+            LLM-->>Reflector: "Issues Found"
+            Reflector-->>Graph: isComplete = false
+            
+            Graph->>Reviser: Correct Approach
+            Reviser->>LLM: Determine fix using feedback
+            LLM-->>Reviser: Corrected execution plan/tools
+            Reviser-->>Graph: Updated state
+        end
+    end
+    
+    Graph->>User: Comprehensive Task Summary
 ```
 
-### IAM Permissions Required
+### AWS Diagrams-as-Code Representation
 
-Target accounts must deploy a CloudFormation stack creating an IAM role with:
+We also maintain an infrastructure diagram representing the architectural deployment of the LangGraph components natively on AWS. This is generated via the Python `diagrams` library.
 
-```yaml
-Permissions:
-  - ec2:StartInstances
-  - ec2:StopInstances
-  - ec2:DescribeInstances
-  - rds:StartDBInstance
-  - rds:StopDBInstance
-  - rds:DescribeDBInstances
-  - ecs:UpdateService
-  - ecs:DescribeServices
-  - ecs:ListServices
-```
+![DevOps Agent Architecture](diagrams/devops_agent_architecture.png)
 
-### Trust Relationship
+## Security Architecture
 
-The cross-account role trusts the Nucleus Platform's AWS account:
+The platform enforces a strict **Hub-and-Spoke** cross-account model:
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::<NucleusPlatformAccountId>:root"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-```
-
-## AI Agent Architecture
-
-The DevOps Agent uses a **Reflection Pattern** with LangGraph:
-
-```mermaid
-graph LR
-    Start([User Input]) --> Plan[Plan Node]
-    Plan --> Generate[Generate Node]
-    Generate --> Tools[Tool Execution]
-    Tools --> Reflect[Reflect Node]
-    Reflect --> Decision{Quality Check}
-    Decision -->|Needs Revision| Revise[Revise Node]
-    Revise --> Tools
-    Decision -->|Complete| Final[Final Output]
-    Final --> End([Response])
-```
-
-### Agent Nodes
-
-1. **Plan Node**: Creates step-by-step execution plan
-2. **Generate Node**: Executes plan using available tools
-3. **Tool Node**: Runs tools (AWS CLI, file operations, web search)
-4. **Reflect Node**: Evaluates quality and completeness
-5. **Revise Node**: Improves output based on reflection
-6. **Final Node**: Synthesizes comprehensive response
-
-### Available Tools
-
-| Tool | Description |
-|------|-------------|
-| `execute_command` | Run shell commands (AWS CLI, etc.) |
-| `read_file` | Read file contents |
-| `write_file` | Write content to files |
-| `list_directory` | List directory contents |
-| `web_search` | Search the web via Tavily API |
-| `get_aws_credentials` | Obtain AWS credentials for account context |
-
-## Deployment Architecture
-
-### Development Environment
-
-```bash
-# Local development
-npm run dev  # Starts Next.js on port 3000
-```
-
-### Production Deployment
-
-```mermaid
-graph TB
-    CF[CloudFront] --> ALB[Application Load Balancer]
-    ALB --> ECS[ECS Fargate Service]
-    ECS --> DDB[(DynamoDB)]
-    EventBridge[EventBridge Rules] --> Lambda[Scheduler Lambda]
-    Lambda --> DDB
-```
-
-### Infrastructure Stacks
-
-1. **NetworkingStack**: VPC, Subnets, Security Groups
-2. **ComputeStack**: ECS Cluster, ALB, CloudFront
-3. **WebUIStack**: Next.js application deployment
-
-## Environment Variables
-
-```bash
-# AWS Configuration
-AWS_REGION=ap-south-1
-NEXT_PUBLIC_AWS_REGION=ap-south-1
-
-# DynamoDB Tables
-DYNAMODB_TABLE_NAME=nucleus-ops-main
-DYNAMODB_AUDIT_TABLE_NAME=nucleus-ops-audit
-DYNAMODB_CHECKPOINT_TABLE=nucleus-ops-checkpoints
-DYNAMODB_WRITES_TABLE=nucleus-ops-writes
-
-# Authentication
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=<your-secret>
-
-# AI Agent (Optional)
-TAVILY_API_KEY=<your-tavily-key>
-```
-
-## Performance Considerations
-
-1. **DynamoDB On-Demand**: Auto-scales based on traffic
-2. **Lambda Concurrency**: Limited to prevent target API throttling
-3. **Batch Processing**: Resources processed in batches to avoid timeouts
-4. **Message Truncation**: Agent context window management
-5. **Checkpointing**: Persistent conversation state across sessions
-
-## Monitoring & Observability
-
-- **CloudWatch Logs**: All Lambda and ECS logs
-- **Audit Trail**: 30-day TTL on audit records
-- **Health Endpoint**: `/api/health` for load balancer health checks
+- The Agent (`ECS Task Role`) and Async Executors (`Scheduler Lambda Role`) use `sts:AssumeRole` to access targeted customer environments. 
+- Transient credentials (`get_aws_credentials` tool) map automatically to the user's selected context in the Web UI.
+- No permanent credentials are kept; cross-account roles strictly restrict actions (e.g., specific `ec2`, `rds`, `ecs` policies) allowed based on the selected AI Skill (Read-Only vs DevOps Mutation).
