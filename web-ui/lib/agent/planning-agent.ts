@@ -314,10 +314,13 @@ Review the execution results and provide your analysis in the following JSON for
     "analysis": "Brief analysis of what was done and the results",
     "issues": "Any issues or errors found, or 'None' if no issues",
     "suggestions": "Suggestions for improvement, or 'None' if no suggestions",
-    "isComplete": true or false (set to true ONLY if ALL plan steps are completed successfully)
+    "isComplete": true or false (set to true ONLY if ALL plan steps are completed successfully),
+    "updatedPlan": [
+        { "step": "Step description as in original plan", "status": "completed" | "pending" | "failed" }
+    ]
 }
 
-IMPORTANT: Set isComplete to true ONLY when the original task has been fully accomplished.
+IMPORTANT: Set isComplete to true ONLY when the original task has been fully accomplished. You MUST return the 'updatedPlan' array updating the status of each step based on the execution results.
 If there are remaining steps in the plan or the task is not fully done, set isComplete to false.
 
 Be specific and actionable in your feedback.
@@ -325,8 +328,22 @@ Only return the JSON object, nothing else.`);
 
         // Construct a clean input for the reflector to avoid tool-related validation issues
         // This approach mirrors fast-agent.ts and prevents the reflector from trying to call tools
+
+        // Find the most recent AI message that has text content
+        const recentAiMessages = messages.filter(m => m._getType() === 'ai');
+        const lastAiMessage = recentAiMessages.length > 0 ? recentAiMessages[recentAiMessages.length - 1] : null;
+        let lastAiText = "None";
+        if (lastAiMessage && lastAiMessage.content) {
+            lastAiText = typeof lastAiMessage.content === 'string'
+                ? lastAiMessage.content
+                : JSON.stringify(lastAiMessage.content);
+        }
+
         const summaryInput = new HumanMessage({
             content: `Please analyze the following execution and provide your feedback in JSON format.
+
+Recent Assistant Output:
+${truncateOutput(lastAiText, 1500)}
 
 Tool Results (most recent):
 ${toolResults.slice(-5).join('\n---\n')}
@@ -342,6 +359,7 @@ ${plan.map((s, i) => `${i + 1}. [${s.status}] ${s.step}`).join('\n')}`
         let issues = "None";
         let suggestions = "None";
         let isComplete = false;
+        let updatedPlan: PlanStep[] = [];
 
         try {
             const content = response.content as string;
@@ -356,6 +374,9 @@ ${plan.map((s, i) => `${i + 1}. [${s.status}] ${s.step}`).join('\n')}`
                 suggestions = parsed.suggestions || "None";
                 // Only mark complete if explicitly true in parsed JSON
                 isComplete = parsed.isComplete === true;
+                if (parsed.updatedPlan && Array.isArray(parsed.updatedPlan) && parsed.updatedPlan.length > 0) {
+                    updatedPlan = parsed.updatedPlan;
+                }
             } else {
                 console.log("[Reflector] No JSON found, using raw content fallback");
                 analysis = content;
@@ -394,13 +415,19 @@ ${suggestions !== "None" ? `💡 **Suggestions:** ${suggestions}` : ""}
             isComplete = true;
         }
 
-        return {
+        const resultState: Partial<ReflectionState> = {
             messages: [new AIMessage({ content: feedback })],
             reflection: analysis,
             errors: issues !== "None" ? [issues] : [],
             isComplete,
             nextAction: isComplete ? "complete" : "revise"
         };
+
+        if (updatedPlan.length > 0) {
+            resultState.plan = updatedPlan;
+        }
+
+        return resultState;
     }
 
     // --- REVISER NODE ---
